@@ -52,13 +52,16 @@ const neatWorldpayvtMixin = {
             alert("Worldpay integration is not active. Please update the activation code.");
             return;
         }
-        debugger;
+        
         this._enableButton()
         $('body').unblock();
         const popup = document.querySelector('#neatworldpayvt_popup');
         if (popup) {
             popup.style.display = 'block';
             this._populateVirtualTerminalContainer(processingValues);
+            
+            // Start polling for payment status
+            this._startPaymentPolling(processingValues.transaction_key, processingValues.transaction_reference);
         }
     },
     
@@ -89,6 +92,9 @@ const neatWorldpayvtMixin = {
         if (popup) {
             popup.style.display = 'block';
             this._populateVirtualTerminalContainer(processingValues);
+            
+            // Start polling for payment status
+            this._startPaymentPolling(processingValues.transaction_key, processingValues.transaction_reference);
         }
     },
 
@@ -140,6 +146,10 @@ const neatWorldpayvtMixin = {
                     </p>
                 </div>
                 ` : ''}
+                
+                <div id="polling-status" style="display: none; background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 6px; padding: 12px; margin: 15px 0; text-align: center; color: #0056b3; font-size: 14px;">
+                    Checking payment status...
+                </div>
                 
                 <div style="margin-top: 20px;">
                     <button type="button" 
@@ -200,6 +210,221 @@ const neatWorldpayvtMixin = {
             const popup = document.querySelector('#neatworldpayvt_popup');
             if (popup) {
                 popup.style.display = 'none';
+            }
+            
+            // Stop polling when popup is closed
+            if (window._currentPaymentForm && window._currentPaymentForm._stopPaymentPolling) {
+                window._currentPaymentForm._stopPaymentPolling();
+            }
+        };
+    },
+
+    /**
+     * Start polling the payment endpoint to check for payment completion.
+     *
+     * @private
+     * @param {string} transactionKey - The transaction key for validation
+     * @param {string} transactionReference - The transaction reference
+     * @return {undefined}
+     */
+    _startPaymentPolling: function (transactionKey, transactionReference) {
+        const self = this;
+        let pollCount = 0;
+        const maxPolls = 60; // Maximum 5 minutes (60 * 5 seconds)
+        const pollInterval = 5000; // 5 seconds
+        
+        // Store polling state to allow cancellation
+        this._pollingActive = true;
+        this._pollingTimeout = null;
+        
+        // Store reference to this instance for the close function
+        window._currentPaymentForm = this;
+        
+        const pollStatus = async function() {
+            // Check if polling has been cancelled
+            if (!self._pollingActive) {
+                return;
+            }
+            
+            try {
+                pollCount++;
+                debugger
+                // Update status in popup
+                self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
+                
+                // Call the controller endpoint
+                const response = await self._rpc({
+                    route: `/neatworldpayvt/result/${transactionReference}/${transactionKey}`,
+                    params: {}
+                });
+                
+                // Check the response status in the JSON payload
+                if (response.status === 200) {
+                    // Payment was successful and we should redirect
+                    self._updatePollingStatus('Payment completed! Redirecting...');
+                    setTimeout(() => {
+                        window.location.href = '/payment/status';
+                    }, 1000);
+                } else if (response.status === 404) {
+                    // Payment not found yet, continue polling
+                    if (pollCount >= maxPolls) {
+                        // Timeout reached - show error popup
+                        self._showErrorPopup('Timeout: Payment not completed within expected time.');
+                        return;
+                    }
+                    
+                    // Continue polling after delay
+                    self._pollingTimeout = setTimeout(pollStatus, pollInterval);
+                } else {
+                    // Handle other error status codes
+                    const errorMessage = response.data?.error || 'Payment verification failed';
+                    self._showErrorPopup(`Error: ${errorMessage}`);
+                }
+                
+            } catch (error) {
+                console.log('Polling attempt failed:', error);
+                
+                // Check if polling has been cancelled
+                if (!self._pollingActive) {
+                    return;
+                }
+                
+                // For network errors or other exceptions, stop polling and show error popup
+                const errorMessage = error.message || 'Payment verification failed';
+                self._showErrorPopup(`Error: ${errorMessage}`);
+            }
+        };
+        
+        // Start polling
+        pollStatus();
+    },
+
+    /**
+     * Update the polling status in the popup.
+     *
+     * @private
+     * @param {string} status - The status message to display
+     * @return {undefined}
+     */
+    _updatePollingStatus: function (status) {
+        const statusElement = document.getElementById('polling-status');
+        if (statusElement) {
+            statusElement.textContent = status;
+            statusElement.style.display = 'block';
+        }
+    },
+
+    /**
+     * Stop the payment polling.
+     *
+     * @private
+     * @return {undefined}
+     */
+    _stopPaymentPolling: function () {
+        this._pollingActive = false;
+        if (this._pollingTimeout) {
+            clearTimeout(this._pollingTimeout);
+            this._pollingTimeout = null;
+        }
+        console.log('Payment polling stopped');
+    },
+
+    /**
+     * Show error popup and close the current virtual terminal popup.
+     *
+     * @private
+     * @param {string} errorMessage - The error message to display
+     * @return {undefined}
+     */
+    _showErrorPopup: function (errorMessage) {
+        // Stop polling first
+        this._stopPaymentPolling();
+        
+        // Close the current virtual terminal popup
+        const currentPopup = document.querySelector('#neatworldpayvt_popup');
+        if (currentPopup) {
+            currentPopup.style.display = 'none';
+        }
+        
+        // Create and show error popup
+        const errorPopup = document.createElement('div');
+        errorPopup.id = 'neatworldpayvt_error_popup';
+        errorPopup.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        `;
+        
+        errorPopup.innerHTML = `
+            <div style="
+                background: white;
+                border-radius: 8px;
+                padding: 30px;
+                max-width: 500px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            ">
+                <div style="
+                    width: 60px;
+                    height: 60px;
+                    background: #dc3545;
+                    border-radius: 50%;
+                    margin: 0 auto 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                ">
+                    <span style="color: white; font-size: 24px;">⚠️</span>
+                </div>
+                
+                <h3 style="
+                    margin: 0 0 15px 0;
+                    color: #dc3545;
+                    font-size: 18px;
+                ">Payment Error</h3>
+                
+                <p style="
+                    margin: 0 0 25px 0;
+                    color: #666;
+                    font-size: 14px;
+                    line-height: 1.5;
+                ">${errorMessage}</p>
+                
+                <button type="button" 
+                        onclick="closeErrorPopup()" 
+                        style="
+                            background: #dc3545;
+                            color: white;
+                            border: none;
+                            border-radius: 4px;
+                            padding: 12px 24px;
+                            cursor: pointer;
+                            font-size: 14px;
+                            transition: background-color 0.2s;
+                        "
+                        onmouseover="this.style.background='#c82333'"
+                        onmouseout="this.style.background='#dc3545'">
+                    Close
+                </button>
+            </div>
+        `;
+        
+        // Add to body
+        document.body.appendChild(errorPopup);
+        
+        // Add close function to global scope
+        window.closeErrorPopup = function() {
+            const popup = document.getElementById('neatworldpayvt_error_popup');
+            if (popup) {
+                popup.remove();
             }
         };
     },

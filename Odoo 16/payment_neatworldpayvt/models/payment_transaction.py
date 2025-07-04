@@ -4,7 +4,7 @@ import requests
 from odoo import _, fields, models
 from odoo.exceptions import UserError, ValidationError
 from werkzeug import urls
-from odoo.addons.payment_neatworldpayvt.controllers.main import NeatWorldpayController
+from odoo.addons.payment_neatworldpayvt.controllers.main import NeatWorldpayVTController
 import uuid
 import re
 from decimal import Decimal
@@ -234,7 +234,7 @@ class PaymentTransaction(models.Model):
         transaction_key = None
         transaction_reference = None
         if exec_code:
-            local_context = {"tr": self, "processing_values": processing_values, "Decimal": Decimal, "requests": requests, "base64": base64, "re": re, "urls": urls, "neat_worldpay_controller_result_action": NeatWorldpayController.result_action, 'env': self.env, 'fields': fields }
+            local_context = {"tr": self, "processing_values": processing_values, "Decimal": Decimal, "requests": requests, "base64": base64, "re": re, "urls": urls, "neat_worldpay_controller_result_action": NeatWorldpayVTController.result_action, 'env': self.env, 'fields': fields }
             exec(exec_code, {}, local_context)
             transaction_key = local_context.get("transaction_key")
             transaction_reference = local_context.get("transaction_reference")

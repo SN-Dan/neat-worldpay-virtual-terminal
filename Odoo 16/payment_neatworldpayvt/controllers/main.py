@@ -159,19 +159,18 @@ class NeatWorldpayVTController(http.Controller):
             raise ValidationError(_("Error verifying payment in response"))
 
     @http.route(
-        result_action + "/<string:transaction_key>",
-        type="http",
-        auth="public",
-        csrf=False,
-        save_session=False,
+        result_action + "/<string:reference>/<string:transaction_key>",
+        type="json",
+        auth="user",
+         methods=['POST']
     )
-    def neatworldpayvt_result(self, transaction_key, **kwargs):
+    def neatworldpayvt_result(self, reference, transaction_key, **kwargs):
         _logger.info(f"\n Redirect Path {request.httprequest.path} \n")
         _logger.info(f"\n Kwargs {kwargs} \n")
         
-        original_reference = kwargs.get("reference", False)
+        original_reference = reference
         if not original_reference:
-            return request.redirect("/payment/status")
+            return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
         
         # First, try to find the transaction with the original reference
         res = (
@@ -180,21 +179,17 @@ class NeatWorldpayVTController(http.Controller):
             .search([
                 ("reference", "=", original_reference),
                 ("provider_code", "=", "neatworldpayvt"),
-                ("state", "in", ["draft", "pending", "done"])
+                ("state", "in", ["draft", "done"])
             ], limit=1)
         )
         
         if not res:
             _logger.warning(f"No transaction found for reference: {original_reference}")
-            return request.redirect("/payment/status")
+            return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
         
         # Validate transaction key based on status
-        if status == 'success':
-            if not res.neatworldpayvt_validation_hash or not res.neatworldpayvt_validate_transaction_key(transaction_key):
-                return request.redirect("/payment/status")
-        elif status == 'failure':
-            if not res.neatworldpayvt_failure_validation_hash or not res.neatworldpayvt_validate_failure_transaction_key(transaction_key):
-                return request.redirect("/payment/status")
+        if not res.neatworldpayvt_validation_hash or not res.neatworldpayvt_validate_transaction_key(transaction_key):
+            return {'status': 403, 'data': { 'error': 'Forbidden' }}
         
         # Get the expected amount from the transaction
         expected_amount = res.amount if hasattr(res, 'amount') else None
@@ -209,20 +204,12 @@ class NeatWorldpayVTController(http.Controller):
                 #kwargs["reference"] = found_reference
             elif found_reference is None:
                 _logger.error(f"Payment not found")
-                return request.make_response(
-                    json.dumps({'error': 'Payment not found'}),
-                    status=404,
-                    headers=[('Content-Type', 'application/json')]
-                )
+                return {'status': 404, 'data': { 'error': 'Payment not found' }}
                 
         except ValidationError as e:
             # Payment verification failed, return 400 error
             _logger.error(f"Payment verification failed: {e}")
-            return request.make_response(
-                json.dumps({'error': str(e)}),
-                status=400,
-                headers=[('Content-Type', 'application/json')]
-            )
+            return {'status': 400, 'data': { 'error': str(e) }}
         
         amount = response_data['_embedded']['payments'][0]['value']['amount']
         result_state = 'done'
@@ -238,4 +225,4 @@ class NeatWorldpayVTController(http.Controller):
         except Exception as e:
             _logger.error(f"Error handling notification data for transaction {res.reference}: {e}")
 
-        return request.redirect("/payment/status")
+        return {'status': 200, 'data': { 'message': 'Payment received' }}
