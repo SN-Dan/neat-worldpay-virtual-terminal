@@ -7,14 +7,13 @@ import logging
 import pprint
 import time
 import re
+import requests
 from decimal import Decimal
 from odoo.http import request
 from odoo import _, http, fields, sql_db
 from contextlib import closing
 from odoo.exceptions import ValidationError
 from datetime import datetime
-import base64
-import requests
 
 _logger = logging.getLogger(__name__)
 
@@ -95,6 +94,7 @@ class NeatWorldpayVTController(http.Controller):
             _logger.info(f"Trying reference: {reference}")
             response = requests.get(worldpay_url, headers=headers, timeout=10)
             
+            # Check if we got a successful response (status 200)
             if response.ok:
                 response_data = response.json()
                 _logger.info(f"Found successful response for reference: {reference}")
@@ -184,11 +184,9 @@ class NeatWorldpayVTController(http.Controller):
         if not original_reference:
             return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
         
-        # Remove SNSVT- prefix if present
         if original_reference.startswith('SNSVT-'):
             original_reference = original_reference[6:]  # Remove 'SNSVT-' (6 characters)
             _logger.info(f"Removed SNSVT- prefix, new reference: {original_reference}")
-        
         # First, try to find the transaction with the original reference
         res = (
             request.env["payment.transaction"]
@@ -204,10 +202,10 @@ class NeatWorldpayVTController(http.Controller):
             _logger.warning(f"No transaction found for reference: {original_reference}")
             return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
         
-        # Validate transaction key
+        # Validate transaction key based on status
         if not res.neatworldpayvt_validation_hash or not res.neatworldpayvt_validate_transaction_key(transaction_key):
             return {'status': 403, 'data': { 'error': 'Forbidden' }}
-
+        
         # Get the expected amount from the transaction
         expected_amount = res.amount if hasattr(res, 'amount') else None
         response_data = None
@@ -219,7 +217,7 @@ class NeatWorldpayVTController(http.Controller):
                 _logger.info(f"Found transaction with different reference: {found_reference} (original: {original_reference})")
                 # Update the reference in kwargs for processing
                 #kwargs["reference"] = found_reference
-            elif found_reference is None or response_data is None:
+            elif found_reference is None or response_data is None or len(response_data) == 0:
                 _logger.error(f"Payment not found")
                 return {'status': 404, 'data': { 'error': 'Payment not found' }}
                 
