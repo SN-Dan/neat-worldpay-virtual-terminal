@@ -264,8 +264,8 @@ paymentForm.include({
                 
                 // Call the controller endpoint using Odoo 17+ RPC format
                 const response = await self.env.services.rpc({
-                    route: `/neatworldpayvt/result/${transactionReference}/${transactionKey}`,
-                    params: {}
+                    route: `/neatworldpayvt/result/${transactionReference}`,
+                    params: { transaction_key: transactionKey }
                 });
                 
                 // Check the response status in the JSON payload

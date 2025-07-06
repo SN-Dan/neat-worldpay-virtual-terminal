@@ -248,16 +248,15 @@ const neatWorldpayvtMixin = {
             
             try {
                 pollCount++;
-                debugger
                 // Update status in popup
                 self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
                 
                 // Call the controller endpoint
                 const response = await self._rpc({
-                    route: `/neatworldpayvt/result/${transactionReference}/${transactionKey}`,
-                    params: {}
+                    route: `/neatworldpayvt/result/${transactionReference}`,
+                    params: { transaction_key: transactionKey }
                 });
-                
+                debugger
                 // Check the response status in the JSON payload
                 if (response.status === 200) {
                     // Payment was successful and we should redirect

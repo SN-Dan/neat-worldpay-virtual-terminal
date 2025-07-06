@@ -26,6 +26,7 @@ class NeatWorldpayVTController(http.Controller):
         """
         Search backwards through transaction references if the original reference ends with -{number}.
         Loops from the number down to 0, trying each reference with a 500ms delay.
+        If the reference doesn't end with -{number}, makes a single request for the original reference.
         
         :param str original_reference: The original transaction reference
         :param object provider: The payment provider object
@@ -35,28 +36,13 @@ class NeatWorldpayVTController(http.Controller):
         # Check if reference ends with -{number}
         match = re.match(r'^(.+)-(\d+)$', original_reference)
         if not match:
-            return original_reference, None
+            # If no match, try the original reference directly
+            return self._try_single_reference('SNSVT-' + original_reference, provider, expected_amount)
         
-        base_reference = match.group(1)
+        base_reference = 'SNSVT-' + match.group(1)
         start_number = int(match.group(2))
         
         _logger.info(f"Starting backward search for base reference: {base_reference}, starting from: {start_number}")
-        
-        # Prepare headers for Worldpay API calls
-        basicTokenUnencoded = provider.neatworldpayvt_username + ":" + provider.neatworldpayvt_password
-        basicToken = base64.b64encode(basicTokenUnencoded.encode("utf-8")).decode()
-        
-        headers = {
-            "Authorization": "Basic " + basicToken,
-            "Content-Type": "application/vnd.worldpay.payment_pages-v1.hal+json",
-            "Accept": "application/vnd.worldpay.payment_pages-v1.hal+json",
-            "User-Agent": "neatapps"
-        }
-        
-        # Determine base URL based on provider state
-        base_url = "https://try.access.worldpay.com/paymentQueries/payments"
-        if provider.state == "enabled":
-            base_url = "https://access.worldpay.com/paymentQueries/payments"
         
         # Search backwards from start_number to 0
         for i in range(start_number, -1, -1):
@@ -67,37 +53,71 @@ class NeatWorldpayVTController(http.Controller):
                 # For other numbers, append -{number}
                 test_reference = f"{base_reference}-{i}"
             
-            worldpay_url = f"{base_url}?transactionReference={test_reference}"
+            result = self._try_single_reference(test_reference, provider, expected_amount)
+            if result[1] is not None:  # If we found a payment
+                return result
             
-            try:
-                _logger.info(f"Trying reference: {test_reference}")
-                response = requests.get(worldpay_url, headers=headers, timeout=10)
-                
-                # Check if we got a successful response (status 200)
-                if response.status_code == 200:
-                    response_data = response.json()
-                    _logger.info(f"Found successful response for reference: {test_reference}")
-                    
-                    # Verify that there's a payment in the response
-                    if self._verify_payment_in_response(response_data, expected_amount):
-                        return test_reference, response_data
-                    else:
-                        return None, None
-                
-                _logger.info(f"No success for reference: {test_reference}, status: {response.status_code}")
-                
-                # Wait 500ms before next call (except for the last iteration)
-                if i > 0:
-                    time.sleep(0.5)
-                    
-            except Exception as e:
-                _logger.error(f"Error checking reference {test_reference}: {e}")
-                # Continue to next iteration even if there's an error
-                if i > 0:
-                    time.sleep(0.5)
+            # Wait 100ms before next call (except for the last iteration)
+            if i > 0:
+                time.sleep(0.1)
         
         _logger.warning(f"No successful transaction found in backward search for base: {base_reference}")
         return None, None
+
+    def _try_single_reference(self, reference, provider, expected_amount=None):
+        """
+        Try to find a payment for a single reference.
+        
+        :param str reference: The transaction reference to check
+        :param object provider: The payment provider object
+        :param float expected_amount: The expected payment amount to verify
+        :return: tuple (reference, response_data) or (reference, None) if not found
+        """
+        # Prepare headers for Worldpay API calls
+        basicTokenUnencoded = provider.neatworldpayvt_username + ":" + provider.neatworldpayvt_password
+        basicToken = base64.b64encode(basicTokenUnencoded.encode("utf-8")).decode()
+        
+        headers = {
+            "Authorization": "Basic " + basicToken,
+            "Accept": "application/vnd.worldpay.payment-queries-v1.hal+json",
+            "User-Agent": "neatapps"
+        }
+        
+        # Determine base URL based on provider state
+        base_url = "https://try.access.worldpay.com/paymentQueries/payments"
+        if provider.state == "enabled":
+            base_url = "https://access.worldpay.com/paymentQueries/payments"
+        
+        worldpay_url = f"{base_url}?transactionReference={reference}"
+        
+        try:
+            _logger.info(f"Trying reference: {reference}")
+            response = requests.get(worldpay_url, headers=headers, timeout=10)
+            
+            # Check if we got a successful response (status 200)
+            if response.ok:
+                response_data = response.json()
+                _logger.info(f"Found successful response for reference: {reference}")
+                _logger.info(f"Response data: {json.dumps(response_data, indent=2)}")
+                
+                if not response_data or '_embedded' not in response_data:
+                    _logger.error("Invalid response structure: missing _embedded")
+                    raise ValidationError(_("Invalid payment response structure"))
+                
+                payments = response_data.get('_embedded', {}).get('payments', [])
+                if payments:
+                    # Verify that there's a payment in the response
+                    if self._verify_payment_in_response(response_data, expected_amount):
+                        return reference, payments
+                    else:
+                        return reference, None
+            
+            _logger.info(f"No success for reference: {reference}, status: {response.status_code}")
+            return reference, None
+                
+        except Exception as e:
+            _logger.error(f"Error checking reference {reference}: {e}")
+            return reference, None
 
     def _verify_payment_in_response(self, response_data, expected_amount=None):
         """
@@ -108,15 +128,7 @@ class NeatWorldpayVTController(http.Controller):
         :return: bool: True if payment is valid, raises ValidationError otherwise
         """
         try:
-            # Check if response has the expected structure
-            if not response_data or '_embedded' not in response_data:
-                _logger.error("Invalid response structure: missing _embedded")
-                raise ValidationError(_("Invalid payment response structure"))
-            
             payments = response_data.get('_embedded', {}).get('payments', [])
-            if not payments:
-                return False
-            
             payment = payments[0]  # Get the first payment
             _logger.info(f"Found payment: {payment.get('transactionReference')}")
             
@@ -159,7 +171,7 @@ class NeatWorldpayVTController(http.Controller):
             raise ValidationError(_("Error verifying payment in response"))
 
     @http.route(
-        result_action + "/<string:reference>/<string:transaction_key>",
+        result_action + "/<string:reference>",
         type="json",
         auth="user",
          methods=['POST']
@@ -172,6 +184,9 @@ class NeatWorldpayVTController(http.Controller):
         if not original_reference:
             return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
         
+        if original_reference.startswith('SNSVT-'):
+            original_reference = original_reference[6:]  # Remove 'SNSVT-' (6 characters)
+            _logger.info(f"Removed SNSVT- prefix, new reference: {original_reference}")
         # First, try to find the transaction with the original reference
         res = (
             request.env["payment.transaction"]
@@ -202,7 +217,7 @@ class NeatWorldpayVTController(http.Controller):
                 _logger.info(f"Found transaction with different reference: {found_reference} (original: {original_reference})")
                 # Update the reference in kwargs for processing
                 #kwargs["reference"] = found_reference
-            elif found_reference is None:
+            elif found_reference is None or response_data is None or len(response_data) == 0:
                 _logger.error(f"Payment not found")
                 return {'status': 404, 'data': { 'error': 'Payment not found' }}
                 
@@ -211,7 +226,7 @@ class NeatWorldpayVTController(http.Controller):
             _logger.error(f"Payment verification failed: {e}")
             return {'status': 400, 'data': { 'error': str(e) }}
         
-        amount = response_data['_embedded']['payments'][0]['value']['amount']
+        amount = response_data[0]['value']['amount']
         result_state = 'done'
 
         data = {
