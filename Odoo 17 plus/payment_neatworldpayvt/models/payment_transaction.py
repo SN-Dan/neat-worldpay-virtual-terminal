@@ -86,6 +86,7 @@ class PaymentTransaction(models.Model):
             _logger.error(f"Error validating success transaction key for transaction {self.reference}: {e}")
             return False
 
+
     #=== BUSINESS METHODS ===#
     def _send_payment_request(self):
         """ Override of payment to simulate a payment request.
@@ -169,7 +170,7 @@ class PaymentTransaction(models.Model):
         tx = self.search([('reference', '=', reference), ('provider_code', '=', 'neatworldpayvt')])
         if not tx:
             raise ValidationError(
-                "NeatWorldpayVT: " + _("No transaction found matching reference %s.", reference)
+                "NeatWorldpay: " + _("No transaction found matching reference %s.", reference)
             )
         return tx
 
@@ -195,10 +196,9 @@ class PaymentTransaction(models.Model):
             # Convert pence to pounds and then to float for comparison with self.amount
             decimal_amount = Decimal(str(notification_data['amount'])) / Decimal('100')
             amount_float = float(decimal_amount)
-            if amount_float == self.amount:
-                self._set_done()
-            else:
-                self._send_capture_request(amount_float)                
+            if amount_float != self.amount:
+                self.sudo().write({ 'amount': amount_float })
+            self._set_done()
         elif state == "cancel":
             self._set_canceled()
         elif state == "error":
@@ -239,4 +239,5 @@ class PaymentTransaction(models.Model):
             transaction_reference = local_context.get("transaction_reference")
             
         return { "transaction_key": transaction_key, "transaction_reference": transaction_reference }
+    
 
