@@ -73,6 +73,12 @@ class NeatWorldpayVTController(http.Controller):
         :param float expected_amount: The expected payment amount to verify
         :return: tuple (reference, response_data) or (reference, None) if not found
         """
+        # Check if this reference has already been processed
+        neat_payment_model = request.env['neatworldpayvt.payment'].sudo()
+        if neat_payment_model.is_reference_processed(reference):
+            _logger.info(f"Reference {reference} has already been processed, skipping")
+            return reference, None
+        
         # Prepare headers for Worldpay API calls
         basicTokenUnencoded = provider.neatworldpayvt_username + ":" + provider.neatworldpayvt_password
         basicToken = base64.b64encode(basicTokenUnencoded.encode("utf-8")).decode()
@@ -213,11 +219,7 @@ class NeatWorldpayVTController(http.Controller):
         try:
             found_reference, response_data = self._search_backwards_for_transaction(original_reference, res.provider_id, expected_amount)
             
-            if found_reference and found_reference != original_reference:
-                _logger.info(f"Found transaction with different reference: {found_reference} (original: {original_reference})")
-                # Update the reference in kwargs for processing
-                #kwargs["reference"] = found_reference
-            elif found_reference is None or response_data is None or len(response_data) == 0:
+            if found_reference is None or response_data is None or len(response_data) == 0:
                 _logger.error(f"Payment not found")
                 return {'status': 404, 'data': { 'error': 'Payment not found' }}
                 
@@ -227,7 +229,24 @@ class NeatWorldpayVTController(http.Controller):
             return {'status': 400, 'data': { 'error': str(e) }}
         
         amount = response_data[0]['value']['amount']
+        currency = response_data[0]['value'].get('currency', 'GBP')
         result_state = 'done'
+
+        # Store the payment record to prevent duplicate processing
+        try:
+            neat_payment_model = request.env['neatworldpayvt.payment'].sudo()
+            neat_payment_model.create_payment_record(
+                worldpay_reference=found_reference,
+                odoo_reference=original_reference,
+                amount=amount,
+                currency=currency,
+                provider_id=res.provider_id.id,
+                transaction_id=res.id
+            )
+            _logger.info(f"Stored payment record for Worldpay reference: {found_reference}")
+        except Exception as e:
+            _logger.error(f"Error storing payment record for {found_reference}: {e}")
+            # Continue processing even if storage fails
 
         data = {
             'reference': kwargs.get("reference", False),

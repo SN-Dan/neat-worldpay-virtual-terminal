@@ -6,7 +6,7 @@
         <field name="inherit_id" ref="payment.payment_provider_form"/>
         <field name="arch" type="xml">
             <group name="provider_credentials" position='inside'>
-                <group attrs="{'invisible': [('code', '!=', 'neatworldpayvt')]}">
+                <group invisible="code != 'neatworldpayvt'">
                     <script type="text/javascript" src="/payment_neatworldpayvt/static/src/js/neatworldpay.js"/>
                     <link rel="stylesheet" href="/payment_neatworldpayvt/static/src/css/neatworldpay.css"/>
                     <div class="alert alert-success" role="alert" colspan="2" invisible="neatworldpayvt_activation_code">
@@ -37,11 +37,6 @@
                         required="code == 'neatworldpayvt' and state != 'disabled'"
                     />
                     <field
-                        name="neatworldpayvt_entity"
-                        string="Entity"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
-                    />
-                    <field
                         name="neatworldpayvt_username"
                         string="Username"
                         required="code == 'neatworldpayvt' and state != 'disabled'"
@@ -59,12 +54,6 @@
                             target="_blank">
                         terms and conditions
                         </a>
-                    </div>
-                   <div class="oe_structure" colspan="2">
-                        <p>
-                            Please make sure to set the following webhook in the Worldpay Dashboard:
-                        </p>
-                        <p><strong>{Odoo Server URL}/neatworldpayvt/wh</strong></p>
                     </div>
                 </group>
             </group>

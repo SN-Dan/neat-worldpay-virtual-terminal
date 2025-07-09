@@ -258,14 +258,11 @@ paymentForm.include({
             
             try {
                 pollCount++;
-                
-                // Update status in popup
                 self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
-                
+                var rpc = self.rpc ? self.rpc : self.env.services.rpc;
                 // Call the controller endpoint using Odoo 17+ RPC format
-                const response = await self.env.services.rpc({
-                    route: `/neatworldpayvt/result/${transactionReference}`,
-                    params: { transaction_key: transactionKey }
+                const response = await rpc(`/neatworldpayvt/result/${transactionReference}`, {
+                    transaction_key: transactionKey
                 });
                 
                 // Check the response status in the JSON payload

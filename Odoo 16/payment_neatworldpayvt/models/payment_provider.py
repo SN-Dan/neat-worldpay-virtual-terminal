@@ -16,10 +16,6 @@ class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
     code = fields.Selection(
         selection_add=[('neatworldpayvt', "WorldPay Virtual Terminal")], ondelete={'neatworldpayvt': 'set default'})
-    neatworldpayvt_entity = fields.Char(
-        string="Entity",
-        help="Worldpay Entity",
-        required_if_provider='neatworldpayvt', groups='base.group_system')
     neatworldpayvt_username = fields.Char(
         string="Username", help="Worldpay username", required_if_provider='neatworldpayvt',
         groups='base.group_system')

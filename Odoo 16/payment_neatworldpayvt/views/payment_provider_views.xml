@@ -37,11 +37,6 @@
                         attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
                     />
                     <field
-                        name="neatworldpayvt_entity"
-                        string="Entity"
-                        attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
-                    />
-                    <field
                         name="neatworldpayvt_username"
                         string="Username"
                         attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
@@ -59,12 +54,6 @@
                             target="_blank">
                         terms and conditions
                         </a>
-                    </div>
-                   <div class="oe_structure" colspan="2">
-                        <p>
-                            Please make sure to set the following webhook in the Worldpay Dashboard:
-                        </p>
-                        <p><strong>{Odoo Server URL}/neatworldpayvt/wh</strong></p>
                     </div>
                 </group>
             </group>

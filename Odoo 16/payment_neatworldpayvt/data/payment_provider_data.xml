@@ -11,7 +11,6 @@
         <field name="support_refund">False</field>
         <field name="support_tokenization">False</field>
 
-        <field name="neatworldpayvt_entity">YourWorldpayEntity</field>
         <field name="neatworldpayvt_username">YourWorldpayUsername</field>
         <field name="neatworldpayvt_password">YourWorldpayPassword</field>
         <field name="neatworldpayvt_reset_code">False</field>
