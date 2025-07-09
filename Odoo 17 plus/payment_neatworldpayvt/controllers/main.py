@@ -219,11 +219,7 @@ class NeatWorldpayVTController(http.Controller):
         try:
             found_reference, response_data = self._search_backwards_for_transaction(original_reference, res.provider_id, expected_amount)
             
-            if found_reference and found_reference != original_reference:
-                _logger.info(f"Found transaction with different reference: {found_reference} (original: {original_reference})")
-                # Update the reference in kwargs for processing
-                #kwargs["reference"] = found_reference
-            elif found_reference is None or response_data is None or len(response_data) == 0:
+            if found_reference is None or response_data is None or len(response_data) == 0:
                 _logger.error(f"Payment not found")
                 return {'status': 404, 'data': { 'error': 'Payment not found' }}
                 
