@@ -259,7 +259,7 @@ paymentForm.include({
             try {
                 pollCount++;
                 self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
-                var rpc = self.rpc ? self.rpc : self.env.services.rpc;
+                var rpc = self.rpc ? self.rpc : self.orm.rpc;
                 // Call the controller endpoint using Odoo 17+ RPC format
                 const response = await rpc(`/neatworldpayvt/result/${transactionReference}`, {
                     transaction_key: transactionKey
