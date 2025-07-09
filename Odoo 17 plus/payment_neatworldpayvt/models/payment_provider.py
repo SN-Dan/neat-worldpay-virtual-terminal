@@ -37,6 +37,7 @@ class PaymentProvider(models.Model):
                 "Authorization": activation_code
             }
             response = requests.get("https://xgxl6uegelrr4377rvggcakjvi0djbts.lambda-url.eu-central-1.on.aws/api/AcquirerLicense/code?version=vt-v1", headers=headers, timeout=10)
+            
             if response.status_code == 200:
                 return response.text
                 
@@ -49,7 +50,7 @@ class PaymentProvider(models.Model):
 
     @api.model
     def create(self, vals):
-        # Check if 'code' is 'neatworldpay' and activation code is being provided or changed
+        # Check if 'code' is 'neatworldpayvt' and activation code is being provided or changed
         _logger.info(f"neatworldpayvt_activation_code {vals.get('neatworldpayvt_activation_code')}")
         if vals.get('neatworldpayvt_activation_code'):
             _logger.info(f"old neatworldpayvt_activation_code {self.neatworldpayvt_activation_code}")
