@@ -1,3 +1,6 @@
+# Original Author: Daniel Stoynev
+# Copyright (c) 2025 SNS Software Ltd. All rights reserved.
+
 import logging
 from odoo import models, fields, api
 from odoo.exceptions import ValidationError

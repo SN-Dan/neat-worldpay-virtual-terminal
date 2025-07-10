@@ -1,3 +1,8 @@
+/**
+ * Original Author: Daniel Stoynev
+ * Copyright (c) 2025 SNS Software Ltd. All rights reserved.
+ */
+
 function showActivationForm(e) {
     e.preventDefault()
     const formPopup = document.querySelector("#neatworldpayvt_form");
