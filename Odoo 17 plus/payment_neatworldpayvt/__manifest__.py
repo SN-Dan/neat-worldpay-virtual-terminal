@@ -24,5 +24,5 @@
             'payment_neatworldpayvt/static/src/js/neatworldpay.js',
         ]
     },
-    'license': 'Other proprietary',
+    'license': 'LGPL-3',
 }
