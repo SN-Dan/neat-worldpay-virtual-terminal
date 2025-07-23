@@ -34,21 +34,18 @@
     </ol>
     <h2>Setup</h2>
     <ol>
-        <li>In Odoo goto Settings -> Sale -> Payment Providers and select Worldpay</li>
+        <li>In Odoo goto Settings -> Sale -> Payment Providers and select Worldpay Virtual Terminal</li>
         <li>There are 3 states available (Disabled, Enabled, Test Mode) select Enabled if you are looking to go live and Test Mode if you first want to do a test run payment and change it later to Enabled for live.</li>
-        <li>You will need an Activation Code for this module and to get it you can click the "Get Free Activation Code" link and fill out the form or contact us at: support@neatapps.io and we will provide the code shortly.</li>
-        <li>Next we will need to enter the Entity, Username and Password so you will need a Worldpay account. If you dont have one get in touch with us and we can help you with premium terms. If you are an Odoo partner we offer commission based compensation for new customers.</li>
-        <li>Once registered go to https://dashboard.worldpay.com login and go to the Developer Tools section, copy your entity and paste it inside Odoo.</li>
+        <li>You will need an Activation Code for this module and to get it you can click the "Get Free Activation Code" link and fill out the form or contact us at: support@sns-software.com and we will provide the code shortly.</li>
+        <li>Next we will need to enter the Username and Password so you will need a Worldpay account. If you dont have one get in touch with us and we can help you with setting one up. If you are an Odoo partner we can offer partnership terms and free B2B support.</li>
+        <li>Once registered go to https://dashboard.worldpay.com login and go to the Developer Tools section.</li>
         <li>Click on API Credentials to generate a Username and Password. in Try Mode you can do test payments if you have selected Test Mode in Odoo otherwise select Live Mode and click Generate Credentials.</li>
-        <li>Copy the Username and Password into Odoo.</li>
-        <li>iFrame checked allows you to keep the user on your Odoo website while making the payment. If you uncheck it the user will be redirected to the worldpay website to complete the payment.</li>
-        <li>The Odoo Server URL is your current Odoo website domain which you see at the top of the browser. It should be automatically filled but if not just copy it from your browser. Example : https://www.example.com</li>
-        <li>Select a Fallback Failure User. This user should be someone responsible to whom we are going to generate an activity to for a Sale Order payment issue if there is no responsible user for the given Sale Order.</li>
+        <li>Copy the Username and Password back in to Odoo payment method (worldpay virtual terminal).</li>
         <li>Save your changes</li>
-        <li>Finally we need to set the webhook. We are again going to copy your Odoo domain (example: https://www.example.com) and add this "/neatworldpay/wh" to the back of it and it should end up looking like: https://www.example.com/neatworldpay/wh</li>
-        <li>Copy this URL and we again need to go to https://dashboard.worldpay.com , login and open Developer Tools</li>
-        <li>You should see the Webhooks section adn you will be given the option to add the Webhook. Paste the constructed URL into the URL field and save.</li>
         <li>You are now ready to take your first payments! If you have selected Testing mode with Try Mode credentials you can use the test cards form here: https://developer.worldpay.com/products/access/hosted-payment-pages/testing</li>
+        <li>You can now use the payment method in through all available channels. We suggest to keep this payment method unpublished in order not to confused clients (unpublished payment methods are still visible to internal users)</li>
+        <li>Usage example: Create a quote and put it in "Quotation Sent" state. On the top left of your screen next to the "Confirm" button on the quote there is a "Preview" button. Clicking it will navigate you to the portal view of the quotation. On this view you can click the "Accept & Pay" or "Sign & Pay" button depending on your configuration. This will lead you to the payment methods menu. Here you need to select "Worldpay Virtul Terminal" and copy the reference code on your display.</li>
+        <li>Go to your Worldpay Online Payment Dashboard and click on "Virtual Terminal" on the side menu. You can toggle between test and live mode on the top. Paste your Reference number under "Transaction Reference". Type in the amount you want to charge and all customer details, then click "charge customer" at the bottom. Once the payment is processed your Odoo quotation will be automatically confirmed and paid following the standard flow for online payments.</li>
     </ol>
     
     <h2>Support</h2>
