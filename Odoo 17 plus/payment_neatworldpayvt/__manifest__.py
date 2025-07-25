@@ -6,6 +6,7 @@
     'summary': "Neat Worldpay Integration for Virtual Terminal.",
     'description': " ",
     'depends': ['payment'],
+    'images': ['static/description/main.gif'],
     'data': [
         'views/payment_provider_views.xml',
         'views/payment_form_templates.xml',
