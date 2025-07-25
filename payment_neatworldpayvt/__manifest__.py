@@ -3,8 +3,11 @@
     'version': '2.0',
     'category': 'Accounting/Payment Providers',
     'sequence': 350,
-    'summary': "Neat Worldpay Integration for Virtual Terminal.",
+    'summary': "Worldpay Official Integration for Virtual Terminal Payments.",
     'description': " ",
+    'author': 'SNS Software',
+    'maintainer': 'SNS Software',
+    'website': 'https://www.sns-software.com',
     'depends': ['payment'],
     'images': ['static/description/main.gif'],
     'data': [
