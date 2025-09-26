@@ -54,35 +54,41 @@ class PaymentProvider(models.Model):
         return None
 
     @api.model
-    def create(self, vals):
-        # Check if 'code' is 'neatworldpayvt' and activation code is being provided or changed
-        _logger.info(f"neatworldpayvt_activation_code {vals.get('neatworldpayvt_activation_code')}")
-        if vals.get('neatworldpayvt_activation_code'):
-            _logger.info(f"old neatworldpayvt_activation_code {self.neatworldpayvt_activation_code}")
-            if vals.get('neatworldpayvt_activation_code') != self.neatworldpayvt_activation_code or vals.get('neatworldpayvt_reset_code'):
+    def create(self, vals_list):
+        # Handle both single dict and list of dicts for Odoo 19 compatibility
+        if isinstance(vals_list, dict):
+            vals_list = [vals_list]
+        
+        for vals in vals_list:
+            # Check if 'code' is 'neatworldpayvt' and activation code is being provided or changed
+            _logger.info(f"neatworldpayvt_activation_code {vals.get('neatworldpayvt_activation_code')}")
+            if vals.get('neatworldpayvt_activation_code'):
+                _logger.info(f"old neatworldpayvt_activation_code {self.neatworldpayvt_activation_code}")
+                if vals.get('neatworldpayvt_activation_code') != self.neatworldpayvt_activation_code or vals.get('neatworldpayvt_reset_code'):
+                    _logger.info(f"Before code")
+                    vals['neatworldpayvt_reset_code'] = False
+                    code = self.neatworldpayvt_get_code(vals['neatworldpayvt_activation_code'])
+                    _logger.info(f"Code: {code != None}")
+                    if code:
+                        vals['neatworldpayvt_cached_code'] = code
+                    else:
+                        _logger.info(f"Raised error for code")
+                        raise ValidationError(_("The activation code is invalid. Please check and try again."))
+            elif vals.get('neatworldpayvt_reset_code'):
                 _logger.info(f"Before code")
                 vals['neatworldpayvt_reset_code'] = False
-                code = self.neatworldpayvt_get_code(vals['neatworldpayvt_activation_code'])
-                _logger.info(f"Code: {code != None}")
+                code = self.neatworldpayvt_get_code(self.neatworldpayvt_activation_code)
+                _logger.info(f"Code: {code}")
                 if code:
                     vals['neatworldpayvt_cached_code'] = code
                 else:
                     _logger.info(f"Raised error for code")
                     raise ValidationError(_("The activation code is invalid. Please check and try again."))
-        elif vals.get('neatworldpayvt_reset_code'):
-            _logger.info(f"Before code")
-            vals['neatworldpayvt_reset_code'] = False
-            code = self.neatworldpayvt_get_code(self.neatworldpayvt_activation_code)
-            _logger.info(f"Code: {code}")
-            if code:
-                vals['neatworldpayvt_cached_code'] = code
-            else:
-                _logger.info(f"Raised error for code")
-                raise ValidationError(_("The activation code is invalid. Please check and try again."))
-        return super(PaymentProvider, self).create(vals)
+        
+        return super(PaymentProvider, self).create(vals_list)
 
     def write(self, vals):
-        # Check if 'code' is 'neatworldpay' and activation code is being updated
+        # Check if 'code' is 'neatworldpayvt' and activation code is being updated
         _logger.info(f"neatworldpayvt_activation_code {vals.get('neatworldpayvt_activation_code')}")
         if vals.get('neatworldpayvt_activation_code'):
             _logger.info(f"old neatworldpayvt_activation_code {self.neatworldpayvt_activation_code}")

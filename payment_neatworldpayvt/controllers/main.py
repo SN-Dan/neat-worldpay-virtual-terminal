@@ -252,16 +252,18 @@ class NeatWorldpayVTController(http.Controller):
         except Exception as e:
             _logger.error(f"Error storing payment record for {found_reference}: {e}")
             # Continue processing even if storage fails
-
+        decimal_amount = Decimal(str(amount)) / Decimal('100')
+        amount_float = float(decimal_amount)
+        _logger.info(f"Amount float: {amount_float}")
         data = {
             'reference': kwargs.get("reference", False),
             'result_state': result_state,
-            'amount': amount
+            'paid_amount': amount_float
         }
         
-        try:
-            res.sudo()._handle_notification_data("neatworldpayvt", data)
-        except Exception as e:
-            _logger.error(f"Error handling notification data for transaction {res.reference}: {e}")
+        # try:
+        res.sudo()._process("neatworldpayvt", data)
+        # except Exception as e:
+        #     _logger.error(f"Error handling notification data for transaction {res.reference}: {e}")
 
         return {'status': 200, 'data': { 'message': 'Payment received' }}

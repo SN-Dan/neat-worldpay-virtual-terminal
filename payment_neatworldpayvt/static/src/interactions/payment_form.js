@@ -1,25 +1,27 @@
 /** @odoo-module */
 
 import { _t } from '@web/core/l10n/translation';
-import paymentForm from '@payment/js/payment_form';
+import { patch } from '@web/core/utils/patch';
 
-paymentForm.include({
+import { PaymentForm } from '@payment/interactions/payment_form';
+
+patch(PaymentForm.prototype, {
 
      /**
      * Open the inline form of the selected payment option, if any.
      *
-     * @override method from @payment/js/payment_form
+     * @override method from @payment/interactions/payment_form
      * @private
      * @param {Event} ev
      * @return {void}
      */
     async _selectPaymentOption(ev) {
-        await this._super(...arguments);
+        await super._selectPaymentOption(...arguments);
     },
         /**
      * Prepare the inline form of Stripe for direct payment.
      *
-     * @override method from @payment/js/payment_form
+     * @override method from @payment/interactions/payment_form
      * @private
      * @param {number} providerId - The id of the selected payment option's provider.
      * @param {string} providerCode - The code of the selected payment option's provider.
@@ -30,7 +32,7 @@ paymentForm.include({
      */
     async _prepareInlineForm(providerId, providerCode, paymentOptionId, paymentMethodCode, flow) {
         if (providerCode !== 'neatworldpayvt') {
-            this._super(...arguments);
+            super._prepareInlineForm(...arguments);
             return;
         }
         
@@ -46,7 +48,7 @@ paymentForm.include({
     /**
      * feedback from a payment provider and redirect the customer to the status page.
      *
-     * @override method from payment.payment_form
+     * @override method from payment.interactions.payment_form
      * @private
      * @param {string} providerCode - The code of the selected payment option's provider.
      * @param {number} paymentOptionId - The id of the selected payment option.
@@ -56,7 +58,7 @@ paymentForm.include({
      */
     async _processDirectFlow(providerCode, paymentOptionId, paymentMethodCode, processingValues) {
         if (providerCode !== 'neatworldpayvt') {
-            this._super(...arguments);
+            super._processDirectFlow(...arguments);
             return;
         }
         
@@ -65,7 +67,7 @@ paymentForm.include({
             return;
         }
         
-        this.call('ui', 'unblock');
+        this.env.bus.trigger('ui', 'unblock');
         const popup = document.querySelector('#neatworldpayvt_popup');
         if (popup) {
             popup.style.display = 'block';
@@ -78,7 +80,7 @@ paymentForm.include({
     /**
      * Redirect the customer to the status route.
      *
-     * @override method from payment.payment_form
+     * @override method from payment.interactions.payment_form
      * @private
      * @param {string} providerCode - The code of the selected payment option's provider.
      * @param {number} paymentOptionId - The id of the selected payment option.
@@ -88,7 +90,7 @@ paymentForm.include({
      */
     async _processTokenFlow(providerCode, paymentOptionId, paymentMethodCode, processingValues) {
         if (providerCode !== 'neatworldpayvt') {
-            this._super(...arguments);
+            super._processTokenFlow(...arguments);
             return;
         }
         
@@ -97,7 +99,7 @@ paymentForm.include({
             return;
         }
         
-        this.call('ui', 'unblock');
+        this.env.bus.trigger('ui', 'unblock');
         const popup = document.querySelector('#neatworldpayvt_popup');
         if (popup) {
             popup.style.display = 'block';
@@ -259,7 +261,8 @@ paymentForm.include({
             try {
                 pollCount++;
                 self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
-                var rpc = self.rpc ? self.rpc : self.orm.rpc;
+                
+                var rpc = self.rpc ? self.rpc : self.services.orm.rpc;
                 // Call the controller endpoint using Odoo 17+ RPC format
                 const response = await rpc(`/neatworldpayvt/result/${transactionReference}`, {
                     transaction_key: transactionKey
