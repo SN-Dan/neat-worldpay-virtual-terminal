@@ -7,7 +7,7 @@
         <field name="arch" type="xml">
             <group name="provider_credentials" position='inside'>
                 <group invisible="code != 'neatworldpayvt'">
-                    <script type="text/javascript" src="/payment_neatworldpayvt/static/src/js/neatworldpay.js"/>
+                    <script type="text/javascript" src="/payment_neatworldpayvt/static/src/interactions/neatworldpay.js"/>
                     <link rel="stylesheet" href="/payment_neatworldpayvt/static/src/css/neatworldpay.css"/>
                     <div class="alert alert-success" role="alert" colspan="2" invisible="neatworldpayvt_activation_code">
                         Don't have an Activation Code yet?<br />
