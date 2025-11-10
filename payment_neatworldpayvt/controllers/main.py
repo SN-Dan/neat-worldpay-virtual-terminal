@@ -26,6 +26,14 @@ _logger = logging.getLogger(__name__)
 class NeatWorldpayVTController(http.Controller):
 
     result_action = "/neatworldpayvt/result"
+    _REFERENCE_PREFIX = "SNSVT-"
+    _MAX_REFERENCE_LENGTH = 20
+
+    def _prefix_if_allowed(self, reference):
+        if not reference.startswith(self._REFERENCE_PREFIX) and len(reference) + len(self._REFERENCE_PREFIX) <= self._MAX_REFERENCE_LENGTH:
+            return self._REFERENCE_PREFIX + reference
+        else:
+            return reference
     
     def _search_backwards_for_transaction(self, original_reference, provider, expected_amount=None):
         """
@@ -41,22 +49,22 @@ class NeatWorldpayVTController(http.Controller):
         # Check if reference ends with -{number}
         match = re.match(r'^(.+)-(\d+)$', original_reference)
         if not match:
-            # If no match, try the original reference directly
-            return self._try_single_reference('SNSVT-' + original_reference, provider, expected_amount)
+            reference_to_try = self._prefix_if_allowed(original_reference)
+            return self._try_single_reference(reference_to_try, provider, expected_amount)
         
-        base_reference = 'SNSVT-' + match.group(1)
+        base_reference = match.group(1)
         start_number = int(match.group(2))
-        
+
         _logger.info(f"Starting backward search for base reference: {base_reference}, starting from: {start_number}")
         
         # Search backwards from start_number to 0
         for i in range(start_number, -1, -1):
             if i == 0:
                 # For 0, use the base reference without any suffix
-                test_reference = base_reference
+                test_reference = self._prefix_if_allowed(base_reference)
             else:
                 # For other numbers, append -{number}
-                test_reference = f"{base_reference}-{i}"
+                test_reference = self._prefix_if_allowed(f"{base_reference}-{i}")
             
             result = self._try_single_reference(test_reference, provider, expected_amount)
             if result[1] is not None:  # If we found a payment
@@ -182,7 +190,7 @@ class NeatWorldpayVTController(http.Controller):
             raise ValidationError(_("Error verifying payment in response"))
 
     @http.route(
-        result_action + "/<string:reference>",
+        result_action + "/<path:reference>",
         type="json",
         auth="user",
          methods=['POST']
