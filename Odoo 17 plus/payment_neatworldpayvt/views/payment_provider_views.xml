@@ -47,6 +47,16 @@
                         password="True"
                         required="code == 'neatworldpayvt' and state != 'disabled'"
                     />
+                    <field
+                        name="neatworldpayvt_checkout_id"
+                        string="Checkout ID"
+                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                    />
+                    <field
+                        name="neatworldpayvt_entity"
+                        string="Entity"
+                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                    />
                     <div class="alert alert-success" role="alert" colspan="2">
                         <b>By using this module you agree to our </b>
                         <a

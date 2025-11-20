@@ -32,6 +32,12 @@ class PaymentProvider(models.Model):
     neatworldpayvt_cached_code = fields.Char(
         string="Cached Code", help="Cached Code")
     neatworldpayvt_reset_code = fields.Boolean(string="Update Module Cache", help="If set to true it will update the module cache", default=False)
+    neatworldpayvt_checkout_id = fields.Char(
+        string="Checkout ID", help="Worldpay Checkout ID", required_if_provider='neatworldpayvt',
+        groups='base.group_system')
+    neatworldpayvt_entity = fields.Char(
+        string="Entity", help="Worldpay merchant entity", required_if_provider='neatworldpayvt',
+        groups='base.group_system')
 
 
     def neatworldpayvt_get_code(self, activation_code):
@@ -41,7 +47,7 @@ class PaymentProvider(models.Model):
                 "Referer": self.company_id.website,
                 "Authorization": activation_code
             }
-            response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v2", headers=headers, timeout=10)
+            response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
             
             if response.status_code == 200:
                 return response.text

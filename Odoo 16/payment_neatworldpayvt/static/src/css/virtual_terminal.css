@@ -1,0 +1,240 @@
+/*
+ * Original Author: Daniel Stoynev
+ * Copyright (c) 2025 SNS Software Ltd. All rights reserved.
+ * Virtual Terminal Payment Form Styles - Worldpay SDK Style
+ */
+
+.checkout .label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.checkout .label .type {
+    color: green;
+    font-weight: 400;
+    margin-left: 8px;
+}
+
+.checkout.visa .label .type:before {
+    content: "(visa)";
+}
+
+.checkout.mastercard .label .type:before {
+    content: "(master card)";
+}
+
+.checkout.amex .label .type:before {
+    content: "(american express)";
+}
+
+.checkout .field {
+    height: 40px;
+    border-bottom: 1px solid lightgray;
+    margin-bottom: 0;
+}
+
+.checkout .field#card-pan {
+    margin-bottom: 30px;
+}
+
+.checkout .field.is-onfocus {
+    border-color: black;
+}
+
+.checkout .field.is-empty {
+    border-color: orange;
+}
+
+.checkout .field.is-invalid {
+    border-color: red;
+}
+
+.checkout .field.is-valid {
+    border-color: green;
+}
+
+.checkout .col-2 {
+    display: flex;
+}
+
+.checkout .col-2 .col {
+    flex: 1;
+}
+
+.checkout .col-2 .col:first-child {
+    margin-right: 15px;
+}
+
+.checkout .col-2 .col:last-child {
+    margin-left: 15px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 6px;
+}
+
+.form-group input[type="text"],
+.form-group select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #495057;
+    background-color: #fff;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.form-group input[type="text"]:focus,
+.form-group select:focus {
+    outline: 0;
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.form-group input[type="text"].error,
+.form-group select.error {
+    border-color: #dc3545;
+}
+
+.submit {
+    background: #007bff;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 20px;
+    color: white;
+    outline: 0;
+    font-size: 14px;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    font-weight: 500;
+    padding: 10px 16px;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.submit:hover {
+    background: #0069d9;
+    border-color: #0062cc;
+}
+
+.submit:disabled {
+    background: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.checkout.is-valid .submit {
+    background: #28a745;
+    border-color: #28a745;
+}
+
+.checkout.is-valid .submit:hover {
+    background: #218838;
+    border-color: #1e7e34;
+}
+
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.clear {
+    background: #6c757d;
+    cursor: pointer;
+    width: 100%;
+    color: white;
+    outline: 0;
+    font-size: 14px;
+    border: 1px solid #6c757d;
+    border-radius: 4px;
+    font-weight: 500;
+    padding: 10px 16px;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.clear:hover {
+    background: #5a6268;
+    border-color: #545b62;
+}
+
+.cancel {
+    background: #dc3545;
+    cursor: pointer;
+    width: 100%;
+    color: white;
+    outline: 0;
+    font-size: 14px;
+    border: 1px solid #dc3545;
+    border-radius: 4px;
+    font-weight: 500;
+    padding: 10px 16px;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.cancel:hover {
+    background: #c82333;
+    border-color: #bd2130;
+}
+
+.error-message {
+    color: #dc3545;
+    font-size: 12px;
+    margin-top: 4px;
+    display: none;
+}
+
+.error-message.show {
+    display: block;
+}
+
+.success-message {
+    color: #28a745;
+    font-size: 14px;
+    margin-top: 15px;
+    text-align: center;
+    display: none;
+    padding: 12px;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 4px;
+}
+
+.success-message.show {
+    display: block;
+}
+
+.success-message[style*="color: #dc3545"] {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+    color: #dc3545;
+}
+
+.checkout.hide-fields .label,
+.checkout.hide-fields .field,
+.checkout.hide-fields .form-group,
+.checkout.hide-fields .button-group {
+    display: none;
+}
+
+.checkout.hide-fields .success-message,
+.checkout.hide-fields #form-error {
+    display: block;
+    text-align: center;
+    margin-top: 30px;
+    font-size: 16px;
+}
+
