@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import requests
+import time
 from decimal import Decimal
 from odoo.http import request
 from odoo import _, http, fields
@@ -17,6 +18,125 @@ _logger = logging.getLogger(__name__)
 
 
 class NeatWorldpayVTController(http.Controller):
+
+    _allowed_ips = [
+        '34.246.73.11', '52.215.22.123', '52.31.61.0', '18.130.125.132',
+        '35.176.91.145', '52.56.235.128', '18.185.7.67', '18.185.134.117',
+        '18.185.158.215', '52.48.6.187', '34.243.65.63', '3.255.13.18',
+        '3.251.36.74', '63.32.208.6', '52.19.45.138', '3.11.50.124',
+        '3.11.213.43', '3.14.190.43', '3.121.172.32', '3.125.11.252',
+        '3.126.98.120', '3.139.153.185', '3.139.255.63', '13.200.51.10',
+        '13.200.56.25', '13.232.151.127', '34.236.63.10', '34.253.172.98',
+        '35.170.209.108', '35.177.246.6', '52.4.68.25', '52.51.12.88',
+        '108.129.30.203'
+    ]
+
+    @http.route(
+        "/neatworldpayvt/wh", type="http", auth="public", csrf=False, methods=["POST", "GET"]
+    )
+    def neatworldpayvt_wh(self, **kwargs):
+        client_ip = request.httprequest.remote_addr
+        _logger.info(f"\n Client IP {client_ip} \n")
+        if client_ip not in self._allowed_ips:
+            return request.make_json_response({
+                'error': 'Forbidden',
+                'message': 'Forbidden'
+            }, status=403)
+
+        response = request.get_json_data()
+        _logger.info(f"\n WH Response {response} \n")
+        try:
+            event_details = response.get("eventDetails") if response else False
+            if not event_details:
+                return request.make_json_response({
+                    'error': 'Bad Request',
+                    'message': 'Bad Request'
+                }, status=400)
+
+            transaction_reference = event_details.get("transactionReference", False)
+            res = (
+                request.env["payment.transaction"]
+                .sudo()
+                .search([
+                    ("reference", "=", transaction_reference),
+                    ("provider_code", "=", "neatworldpayvt"),
+                    ("state", "not in", ["cancel", "error"])
+                ], limit=1)
+            )
+
+            if res:
+                state = event_details.get("type", False)
+                tokenization = event_details.get("tokenPaymentInstrument", False)
+                if state and state not in ("sentForAuthorization", "sentForSettlement"):
+                    if state == "authorized":
+                        count = 0
+                        _logger.info(f"\n WH State is Authorized {res.reference} \n")
+                        while count < 30:
+                            if not res or res.state == "done":
+                                _logger.info(f"\n Transaction was finished while waiting for pending status {res.reference} \n")
+                                return request.make_json_response({
+                                    'error': 'OK',
+                                    'message': 'OK'
+                                }, status=200)
+                            _logger.info(f"\n Current RES State is {res.state} {res.reference} \n")
+                            if res.state == "pending":
+                                break
+                            time.sleep(1)
+                            request.env.cr.commit()
+                            res = (
+                                request.env["payment.transaction"]
+                                .sudo()
+                                .search([
+                                    ("reference", "=", transaction_reference),
+                                    ("provider_code", "=", "neatworldpayvt"),
+                                    ("state", "not in", ["done", "cancel", "error"])
+                                ], limit=1)
+                            )
+                            count += 1
+                    if state == "sentForAuthorization":
+                        state = 'pending'
+                    elif state == "authorized":
+                        state = "done"
+                    elif state == "cancelled":
+                        state = 'cancel'
+                    else:
+                        state = 'error'
+
+                    if res.state == "done" and state in ('cancel', 'error'):
+                        sale_order_ref = res.reference.split("-")[0]
+                        _logger.info(f"\n Transaction Cancelled after done {sale_order_ref} \n")
+                        sale_order = request.env["sale.order"].sudo().search([("name", "=", sale_order_ref)], limit=1)
+                        if sale_order:
+                            _logger.info(f"\n Sale Order Found for cancelled transaction creating activity {sale_order_ref} {sale_order} \n")
+                            user_id = sale_order.user_id.id if sale_order.user_id else None
+                            sale_order.activity_schedule(
+                                act_type_xmlid='mail.mail_activity_data_todo',
+                                user_id=user_id,
+                                date_deadline=fields.Date.today(),
+                                summary="Payment Failed - Action Required",
+                                note=f"The payment failed after initial confirmation {res.reference}. Please review and take action."
+                            )
+
+                    notification_data = {
+                        'reference': transaction_reference,
+                        'result_state': state
+                    }
+                    res.sudo()._handle_notification_data("neatworldpayvt", notification_data)
+                elif not state and tokenization:
+                    _logger.info(f"\n Tokenization event received but is not supported for VT {transaction_reference} \n")
+            else:
+                _logger.warning(f"[WH] Transaction not found for reference: {transaction_reference}")
+        except ValidationError:
+            return request.make_json_response({
+                'error': 'Bad Request',
+                'message': 'Bad Request'
+            }, status=400)
+
+        return request.make_json_response({
+            'error': 'OK',
+            'message': 'OK'
+        }, status=200)
+
 
 
     @http.route(
@@ -57,15 +177,15 @@ class NeatWorldpayVTController(http.Controller):
             
             # Find the transaction
             transaction = (
-                request.env["payment.transaction"]
-                .sudo()
-                .search([
+            request.env["payment.transaction"]
+            .sudo()
+            .search([
                     ("reference", "=", transaction_reference),
-                    ("provider_code", "=", "neatworldpayvt"),
+                ("provider_code", "=", "neatworldpayvt"),
                     ("state", "=", "draft")
-                ], limit=1)
-            )
-            
+            ], limit=1)
+        )
+        
             if not transaction:
                 _logger.warning(f"[PROCESS_PAYMENT] Transaction not found for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Transaction not found")
@@ -172,7 +292,7 @@ class NeatWorldpayVTController(http.Controller):
                     _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
                     return request.redirect('/payment/status')
                     
-            except Exception as e:
+        except Exception as e:
                 _logger.error(f"[PROCESS_PAYMENT] Error processing payment for {transaction_reference}: {e}", exc_info=True)
                 # Set transaction to error state
                 notification_data = {
