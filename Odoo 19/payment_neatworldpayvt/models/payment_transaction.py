@@ -211,7 +211,8 @@ class PaymentTransaction(models.Model):
         state = notification_data['result_state']
         _logger.info(f"\n Process State {state} \n")
         if state == "done":
-            amount_float = notification_data['paid_amount']
+            decimal_amount = Decimal(str(notification_data['amount'])) / Decimal('100')
+            amount_float = float(decimal_amount)
             if amount_float != self.amount:
                 self.sudo().write({ 'amount': amount_float })
             self._set_done()

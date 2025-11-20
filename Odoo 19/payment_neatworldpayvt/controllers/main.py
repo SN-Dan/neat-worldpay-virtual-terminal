@@ -152,7 +152,7 @@ class NeatWorldpayVTController(http.Controller):
                         'result_state': 'done',
                         'amount': int(Decimal(str(transaction.amount)) * Decimal('100'))
                     }
-                    transaction.sudo()._handle_notification_data("neatworldpayvt", notification_data)
+                    transaction.sudo()._process("neatworldpayvt", notification_data)
                     
                     _logger.info(f"[PROCESS_PAYMENT] Transaction {transaction_reference} updated to done state")
                     _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment processed successfully (outcome: {outcome})")
@@ -167,7 +167,7 @@ class NeatWorldpayVTController(http.Controller):
                         'reference': transaction_reference,
                         'result_state': 'error'
                     }
-                    transaction.sudo()._handle_notification_data("neatworldpayvt", notification_data)
+                    transaction.sudo()._process("neatworldpayvt", notification_data)
                     
                     _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
                     return request.redirect('/payment/status')
@@ -179,7 +179,7 @@ class NeatWorldpayVTController(http.Controller):
                     'reference': transaction_reference,
                     'result_state': 'error'
                 }
-                transaction.sudo()._handle_notification_data("neatworldpayvt", notification_data)
+                transaction.sudo()._process("neatworldpayvt", notification_data)
                 
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Exception during payment processing")
                 return request.redirect('/payment/status')
