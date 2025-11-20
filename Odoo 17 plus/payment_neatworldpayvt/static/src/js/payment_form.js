@@ -118,35 +118,8 @@ paymentForm.include({
         const transactionKey = processingValues.transaction_key || '';
         const checkoutId = processingValues.checkout_id || '';
         const worldpayUrl = processingValues.worldpay_url || 'https://try.access.worldpay.com';
-        
-        // Parse JSON strings if needed (Odoo 17 may serialize complex types)
-        let billingAddress = {};
-        if (processingValues.billing_address) {
-            if (typeof processingValues.billing_address === 'string') {
-                try {
-                    billingAddress = JSON.parse(processingValues.billing_address);
-                } catch (e) {
-                    console.error('Failed to parse billing_address:', e);
-                    billingAddress = {};
-                }
-            } else {
-                billingAddress = processingValues.billing_address;
-            }
-        }
-        
-        let countries = [];
-        if (processingValues.countries) {
-            if (typeof processingValues.countries === 'string') {
-                try {
-                    countries = JSON.parse(processingValues.countries);
-                } catch (e) {
-                    console.error('Failed to parse countries:', e);
-                    countries = [];
-                }
-            } else {
-                countries = processingValues.countries;
-            }
-        }
+        const billingAddress = processingValues.billing_address || {};
+        const countries = processingValues.countries || [];
 
         if (!checkoutId) {
             container.innerHTML = `
