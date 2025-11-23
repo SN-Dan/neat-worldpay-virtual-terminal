@@ -1,6 +1,6 @@
 {
     'name': 'Payment Provider: Worldpay Virtual Terminal',
-    'version': '2.0',
+    'version': '3.0',
     'category': 'Accounting/Payment Providers',
     'sequence': 350,
     'summary': "Worldpay Official Integration for Virtual Terminal Payments.",
