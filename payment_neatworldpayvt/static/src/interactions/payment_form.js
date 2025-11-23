@@ -2,12 +2,11 @@
 
 import { _t } from '@web/core/l10n/translation';
 import { patch } from '@web/core/utils/patch';
-
 import { PaymentForm } from '@payment/interactions/payment_form';
 
 patch(PaymentForm.prototype, {
 
-     /**
+    /**
      * Open the inline form of the selected payment option, if any.
      *
      * @override method from @payment/interactions/payment_form
@@ -18,8 +17,9 @@ patch(PaymentForm.prototype, {
     async _selectPaymentOption(ev) {
         await super._selectPaymentOption(...arguments);
     },
-        /**
-     * Prepare the inline form of Stripe for direct payment.
+
+    /**
+     * Prepare the inline form of Worldpay Virtual Terminal for direct payment.
      *
      * @override method from @payment/interactions/payment_form
      * @private
@@ -39,16 +39,15 @@ patch(PaymentForm.prototype, {
         if (flow === 'token') {
             return;
         }
-
         this._setPaymentFlow('direct');
     },
 
     // #=== PAYMENT FLOW ===#
 
     /**
-     * feedback from a payment provider and redirect the customer to the status page.
+     * Process direct payment flow for Worldpay Virtual Terminal.
      *
-     * @override method from payment.interactions.payment_form
+     * @override method from @payment/interactions/payment_form
      * @private
      * @param {string} providerCode - The code of the selected payment option's provider.
      * @param {number} paymentOptionId - The id of the selected payment option.
@@ -62,8 +61,8 @@ patch(PaymentForm.prototype, {
             return;
         }
         
-        if(!processingValues.transaction_key) {
-            alert("Worldpay integration is not active. Please update the activation code.");
+        if(!processingValues.transaction_key || !processingValues.checkout_id) {
+            alert("Worldpay integration is not active. Please update the activation code and checkout ID.");
             return;
         }
         
@@ -72,15 +71,13 @@ patch(PaymentForm.prototype, {
         if (popup) {
             popup.style.display = 'block';
             this._populateVirtualTerminalContainer(processingValues);
-            
-            // Start polling for payment status
-            this._startPaymentPolling(processingValues.transaction_key, processingValues.transaction_reference);
         }
     },
+
     /**
-     * Redirect the customer to the status route.
+     * Process token payment flow for Worldpay Virtual Terminal.
      *
-     * @override method from payment.interactions.payment_form
+     * @override method from @payment/interactions/payment_form
      * @private
      * @param {string} providerCode - The code of the selected payment option's provider.
      * @param {number} paymentOptionId - The id of the selected payment option.
@@ -94,8 +91,8 @@ patch(PaymentForm.prototype, {
             return;
         }
         
-        if(!processingValues.transaction_key) {
-            alert("Worldpay integration is not active. Please update the activation code.");
+        if(!processingValues.transaction_key || !processingValues.checkout_id) {
+            alert("Worldpay integration is not active. Please update the activation code and checkout ID.");
             return;
         }
         
@@ -104,339 +101,697 @@ patch(PaymentForm.prototype, {
         if (popup) {
             popup.style.display = 'block';
             this._populateVirtualTerminalContainer(processingValues);
-            
-            // Start polling for payment status
-            this._startPaymentPolling(processingValues.transaction_key, processingValues.transaction_reference);
         }
     },
 
     /**
-     * Populate the virtual terminal container with transaction reference and copy functionality.
+     * Populate the virtual terminal container with payment form.
      *
      * @private
      * @param {object} processingValues - The processing values of the transaction
      * @return {undefined}
      */
-    _populateVirtualTerminalContainer(processingValues) {
+    _populateVirtualTerminalContainer: function (processingValues) {
         const container = document.querySelector('#neatworldpayvt-container');
         if (!container) return;
 
-        const transactionReference = processingValues.transaction_reference || 'N/A';
-        
-        // Check if transaction reference ends with dash and number (e.g., "originalref-1")
-        const isIterationReference = /-.+$/.test(transactionReference);
-        
-        container.innerHTML = `
-            <div style="text-align: center; padding: 20px;">
-                <h3 style="margin-bottom: 20px; color: #334;">Virtual Terminal Payment</h3>
-                
-                <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
-                    <p style="margin-bottom: 15px; color: #667; font-size: 14px;">
-                        Copy this reference and paste it when you make the virtual terminal payment as a reference:
-                    </p>
-                    
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: white; border: 1px solid #ced4da; border-radius: 6px; padding: 12px;">
-                        <input type="text" 
-                               id="transaction-reference-input" 
-                               value="${transactionReference}" 
-                               readonly 
-                               style="border: none; outline: none; background: transparent; font-family: monospace; font-size: 16px; color: #333; flex: 1; text-align: center;"
-                        />
-                        <button type="button" 
-                                id="copy-reference-btn" 
-                                style="background: #007bff; color: white; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; font-size: 14px; transition: background-color 0.2s;"
-                                onclick="copyTransactionReference()">
-                            Copy
-                        </button>
-                    </div>
-                </div>
-                
-                ${isIterationReference ? `
-                <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
-                    <p style="margin: 0; color: #856404; font-size: 13px; font-style: italic;">
-                        ℹ️ If you have already made a payment with an older iteration of this reference, we will detect it and sync it.
-                    </p>
-                </div>
-                ` : ''}
-                
-                <div id="polling-status" style="display: none; background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 6px; padding: 12px; margin: 15px 0; text-align: center; color: #0056b3; font-size: 14px;">
-                    Checking payment status...
-                </div>
-                
-                <div style="margin-top: 20px;">
-                    <button type="button" 
-                            onclick="closeVirtualTerminalPopup()" 
-                            style="background: #6c757d; color: white; border: none; border-radius: 4px; padding: 10px 20px; cursor: pointer; font-size: 14px;">
-                        Cancel
+        const disclaimerText = _t("This payment channel is strictly for internal employee use. It must never be presented to customers and is not approved for ecommerce transactions.");
+        const transactionReference = processingValues.transaction_reference || '';
+        const transactionKey = processingValues.transaction_key || '';
+        const checkoutId = processingValues.checkout_id || '';
+        const worldpayUrl = processingValues.worldpay_url || 'https://try.access.worldpay.com';
+        const billingAddress = processingValues.billing_address || {};
+        const countries = processingValues.countries || [];
+
+        if (!checkoutId) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <h3 style="margin-bottom: 20px; color: #dc3545;">Configuration Error</h3>
+                    <p style="color: #666;">Checkout ID is missing. Please contact support.</p>
+                    <button type="button" onclick="closeVirtualTerminalPopup()" 
+                            style="background: #6c757d; color: white; border: none; border-radius: 4px; padding: 10px 20px; cursor: pointer; font-size: 14px; margin-top: 20px;">
+                        Close
                     </button>
                 </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = `
+            <style>
+                .checkout .label {
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #495057;
+                    margin-bottom: 8px;
+                    display: block;
+                }
+                .checkout .label .type {
+                    color: green;
+                    font-weight: 400;
+                    margin-left: 8px;
+                }
+                .checkout.visa .label .type:before {
+                    content: "(visa)";
+                }
+                .checkout.mastercard .label .type:before {
+                    content: "(master card)";
+                }
+                .checkout.amex .label .type:before {
+                    content: "(american express)";
+                }
+                .checkout .field {
+                    height: 40px;
+                    border-bottom: 1px solid lightgray;
+                    margin-bottom: 0;
+                }
+                .checkout .field#card-pan {
+                    margin-bottom: 30px;
+                }
+                .checkout .field#card-expiry,
+                .checkout .field#card-cvv {
+                    min-width: 120px;
+                }
+                .checkout .field#card-expiry input,
+                .checkout .field#card-cvv input {
+                    font-size: 18px;
+                    font-weight: 600;
+                    letter-spacing: 2px;
+                    width: 100%;
+                }
+                .checkout .field.is-onfocus {
+                    border-color: black;
+                }
+                .checkout .field.is-empty {
+                    border-color: orange;
+                }
+                .checkout .field.is-invalid {
+                    border-color: red;
+                }
+                .checkout .field.is-valid {
+                    border-color: green;
+                }
+                .checkout .col-2 {
+                    display: flex;
+                }
+                .checkout .col-2 .col {
+                    flex: 1;
+                }
+                .checkout .col-2 .col:first-child {
+                    margin-right: 15px;
+                }
+                .checkout .col-2 .col:last-child {
+                    margin-left: 15px;
+                }
+                .form-group {
+                    margin-bottom: 16px;
+                }
+                .form-group label {
+                    display: block;
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #495057;
+                    margin-bottom: 6px;
+                }
+                .form-group input[type="text"],
+                .form-group select {
+                    width: 100%;
+                    padding: 8px 12px;
+                    border: 1px solid #ced4da;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    color: #495057;
+                    background-color: #fff;
+                    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+                }
+                .form-group input[type="text"]:focus,
+                .form-group select:focus {
+                    outline: 0;
+                    border-color: #80bdff;
+                    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+                }
+                .form-group input[type="text"].error,
+                .form-group select.error {
+                    border-color: #dc3545;
+                }
+                .submit {
+                    background: #007bff;
+                    cursor: pointer;
+                    width: 100%;
+                    margin-top: 20px;
+                    color: white;
+                    outline: 0;
+                    font-size: 14px;
+                    border: 1px solid #007bff;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    padding: 10px 16px;
+                    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+                }
+                .submit:hover {
+                    background: #0069d9;
+                    border-color: #0062cc;
+                }
+                .submit:disabled {
+                    background: #6c757d;
+                    border-color: #6c757d;
+                    cursor: not-allowed;
+                    opacity: 0.65;
+                }
+                .checkout.is-valid .submit {
+                    background: #28a745;
+                    border-color: #28a745;
+                }
+                .checkout.is-valid .submit:hover {
+                    background: #218838;
+                    border-color: #1e7e34;
+                }
+                .button-group {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    margin-top: 20px;
+                }
+                .clear {
+                    background: #6c757d;
+                    cursor: pointer;
+                    width: 100%;
+                    color: white;
+                    outline: 0;
+                    font-size: 14px;
+                    border: 1px solid #6c757d;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    padding: 10px 16px;
+                    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+                }
+                .clear:hover {
+                    background: #5a6268;
+                    border-color: #545b62;
+                }
+                .clear:disabled {
+                    background: #6c757d;
+                    border-color: #6c757d;
+                    cursor: not-allowed;
+                    opacity: 0.65;
+                }
+                .cancel {
+                    background: #dc3545;
+                    cursor: pointer;
+                    width: 100%;
+                    color: white;
+                    outline: 0;
+                    font-size: 14px;
+                    border: 1px solid #dc3545;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    padding: 10px 16px;
+                    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+                }
+                .cancel:hover {
+                    background: #c82333;
+                    border-color: #bd2130;
+                }
+                .cancel:disabled {
+                    background: #6c757d;
+                    border-color: #6c757d;
+                    cursor: not-allowed;
+                    opacity: 0.65;
+                }
+                .error-message {
+                    color: #dc3545;
+                    font-size: 12px;
+                    margin-top: 4px;
+                    display: none;
+                }
+                .error-message.show {
+                    display: block;
+                }
+                .success-message {
+                    color: #28a745;
+                    font-size: 14px;
+                    margin-top: 15px;
+                    text-align: center;
+                    display: none;
+                    padding: 12px;
+                    background-color: #d4edda;
+                    border: 1px solid #c3e6cb;
+                    border-radius: 4px;
+                }
+                .success-message.show {
+                    display: block;
+                }
+            .success-message[style*="color: #dc3545"] {
+                    background-color: #f8d7da;
+                    border-color: #f5c6cb;
+                    color: #dc3545;
+                }
+            .disclaimer {
+                font-size: 14px;
+                background-color: #fff3cd;
+                border: 1px solid #ffeeba;
+                color: #856404;
+                border-radius: 5px;
+                padding: 12px 15px;
+                margin-bottom: 20px;
+                line-height: 1.4;
+            }
+                .checkout.hide-fields .label,
+                .checkout.hide-fields .field,
+                .checkout.hide-fields .form-group,
+                .checkout.hide-fields .button-group {
+                    display: none;
+                }
+                .checkout.hide-fields .success-message,
+                .checkout.hide-fields #form-error {
+                    display: block;
+                    text-align: center;
+                    margin-top: 30px;
+                    font-size: 16px;
+                }
+            </style>
+            <div style="padding: 20px; max-width: 500px; margin: 0 auto;">
+            <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #e9ecef;">
+                <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 600; color: #33475b;">Virtual Terminal Payment</h1>
+            </div>
+            <p class="disclaimer">${disclaimerText}</p>
+                
+                <form class="checkout" id="card-form">
+                    <div class="label">Card number <span class="type"></span></div>
+                    <section id="card-pan" class="field"></section>
+                    <section class="col-2">
+                        <section class="col">
+                            <div class="label">Expiry date</div>
+                            <section id="card-expiry" class="field"></section>
+                        </section>
+                        <section class="col">
+                            <div class="label">CVV</div>
+                            <section id="card-cvv" class="field"></section>
+                        </section>
+                    </section>
+                    
+                    <div class="form-group">
+                        <label for="cardholderName">Cardholder Name</label>
+                        <input type="text" id="cardholderName" name="cardholderName" required>
+                        <div class="error-message" id="cardholderName-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="address">Address</label>
+                        <input type="text" id="address" name="address" value="${billingAddress.addressLine || ''}" required>
+                        <div class="error-message" id="address-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="address2">Address 2</label>
+                        <input type="text" id="address2" name="address2" value="${billingAddress.addressLine2 || ''}">
+                        <div class="error-message" id="address2-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="address3">Address 3</label>
+                        <input type="text" id="address3" name="address3" value="${billingAddress.address3 || ''}">
+                        <div class="error-message" id="address3-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="city">City</label>
+                        <input type="text" id="city" name="city" value="${billingAddress.city || ''}" required>
+                        <div class="error-message" id="city-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="state">State</label>
+                        <input type="text" id="state" name="state" value="${billingAddress.state || ''}">
+                        <div class="error-message" id="state-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="country">Country</label>
+                        <select id="country" name="country" required>
+                            <option value="">Select a country...</option>
+                        </select>
+                        <div class="error-message" id="country-error"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="postcode">Postcode</label>
+                        <input type="text" id="postcode" name="postcode" value="${billingAddress.postalCode || ''}" required>
+                        <div class="error-message" id="postcode-error"></div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button class="submit" type="submit">Charge Customer</button>
+                        <button class="clear" type="button" id="clear">Clear</button>
+                        <button class="cancel" type="button" id="cancel">Cancel</button>
+                    </div>
+                    <div class="error-message" id="form-error"></div>
+                    <div class="success-message" id="success-message">Payment processed successfully!</div>
+                </form>
             </div>
         `;
 
-        // Add the copy functionality to the global scope
-        window.copyTransactionReference = async function() {
-            const input = document.getElementById('transaction-reference-input');
-            if (input) {
-                try {
-                    // Use modern Clipboard API
-                    await navigator.clipboard.writeText(input.value);
-                    
-                    const button = document.getElementById('copy-reference-btn');
-                    if (button) {
-                        const originalText = button.textContent;
-                        button.textContent = 'Copied!';
-                        button.style.background = '#28a745';
-                        
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = '#007bff';
-                        }, 2000);
-                    }
-                } catch (err) {
-                    // Fallback for older browsers or when clipboard API is not available
-                    input.select();
-                    input.setSelectionRange(0, 99999); // For mobile devices
-                    try {
-                        document.execCommand('copy');
-                        
-                        const button = document.getElementById('copy-reference-btn');
-                        if (button) {
-                            const originalText = button.textContent;
-                            button.textContent = 'Copied!';
-                            button.style.background = '#28a745';
-                            
-                            setTimeout(() => {
-                                button.textContent = originalText;
-                                button.style.background = '#007bff';
-                            }, 2000);
-                        }
-                    } catch (fallbackErr) {
-                        console.error('Failed to copy text: ', fallbackErr);
-                        alert('Failed to copy reference. Please copy it manually.');
-                    }
-                }
-            }
+        // Store values for later use
+        window._neatworldpayvt_data = {
+            transactionReference: transactionReference,
+            transactionKey: transactionKey,
+            checkoutId: checkoutId,
+            worldpayUrl: worldpayUrl,
+            countries: countries,
+            countryCode: billingAddress.country || '',
+            billingAddress: billingAddress
         };
 
-        window.closeVirtualTerminalPopup = function() {
-            const popup = document.querySelector('#neatworldpayvt_popup');
-            if (popup) {
-                popup.style.display = 'none';
-            }
-            
-            // Stop polling when popup is closed
-            if (window._currentPaymentForm && window._currentPaymentForm._stopPaymentPolling) {
-                window._currentPaymentForm._stopPaymentPolling();
-            }
-        };
+        // Load Worldpay checkout.js and initialize
+        this._loadWorldpayCheckout(checkoutId, worldpayUrl, countries, billingAddress.country || '');
     },
 
     /**
-     * Start polling the payment endpoint to check for payment completion.
+     * Load Worldpay checkout.js and initialize the form.
      *
      * @private
-     * @param {string} transactionKey - The transaction key for validation
-     * @param {string} transactionReference - The transaction reference
+     * @param {string} checkoutId - The Worldpay checkout ID
+     * @param {string} worldpayUrl - The Worldpay base URL
+     * @param {Array} countries - Array of country objects
+     * @param {string} countryCode - Default country code
      * @return {undefined}
      */
-    _startPaymentPolling(transactionKey, transactionReference) {
+    _loadWorldpayCheckout: function (checkoutId, worldpayUrl, countries, countryCode) {
         const self = this;
-        let pollCount = 0;
-        const maxPolls = 60; // Maximum 5 minutes (60 * 5 seconds)
-        const pollInterval = 5000; // 5 seconds
         
-        // Store polling state to allow cancellation
-        this._pollingActive = true;
-        this._pollingTimeout = null;
-        
-        // Store reference to this instance for the close function
-        window._currentPaymentForm = this;
-        
-        const pollStatus = async function() {
-            // Check if polling has been cancelled
-            if (!self._pollingActive) {
-                return;
-            }
-            
-            try {
-                pollCount++;
-                self._updatePollingStatus(`Checking payment status... (${pollCount}/${maxPolls})`);
-                
-                var rpc = self.rpc ? self.rpc : self.services.orm.rpc;
-                // Call the controller endpoint using Odoo 17+ RPC format
-                const response = await rpc(`/neatworldpayvt/result/${transactionReference}`, {
-                    transaction_key: transactionKey
-                });
-                
-                // Check the response status in the JSON payload
-                if (response.status === 200) {
-                    // Payment was successful and we should redirect
-                    self._updatePollingStatus('Payment completed! Redirecting...');
-                    setTimeout(() => {
-                        window.location.href = '/payment/status';
-                    }, 1000);
-                } else if (response.status === 404) {
-                    // Payment not found yet, continue polling
-                    if (pollCount >= maxPolls) {
-                        // Timeout reached - show error popup
-                        self._showErrorPopup('Timeout: Payment not completed within expected time.');
-                        return;
-                    }
-                    
-                    // Continue polling after delay
-                    self._pollingTimeout = setTimeout(pollStatus, pollInterval);
-                } else {
-                    // Handle other error status codes
-                    const errorMessage = response.data?.error || 'Payment verification failed';
-                    self._showErrorPopup(`Error: ${errorMessage}`);
+        // Populate country dropdown
+        const countrySelect = document.getElementById('country');
+        if (countrySelect && countries && Array.isArray(countries)) {
+            countries.forEach(function(country) {
+                const option = document.createElement('option');
+                option.value = country.code || '';
+                option.textContent = country.name || '';
+                if (country.code === countryCode) {
+                    option.selected = true;
                 }
-                
-            } catch (error) {
-                console.log('Polling attempt failed:', error);
-                
-                // Check if polling has been cancelled
-                if (!self._pollingActive) {
+                countrySelect.appendChild(option);
+            });
+        }
+        
+        // Load Worldpay checkout.js script if not already loaded
+        if (!window.Worldpay || !window.Worldpay.checkout) {
+            const script = document.createElement('script');
+            script.src = `${worldpayUrl}/access-checkout/v2/checkout.js`;
+            script.onload = function() {
+                self._initializeWorldpayCheckout(checkoutId);
+            };
+            script.onerror = function() {
+                const errorEl = document.getElementById('form-error');
+                if (errorEl) {
+                    errorEl.textContent = 'Failed to load payment form. Please refresh the page.';
+                    errorEl.classList.add('show');
+                }
+            };
+            document.head.appendChild(script);
+        } else {
+            this._initializeWorldpayCheckout(checkoutId);
+        }
+    },
+
+    /**
+     * Initialize Worldpay checkout form.
+     *
+     * @private
+     * @param {string} checkoutId - The Worldpay checkout ID
+     * @return {undefined}
+     */
+    _initializeWorldpayCheckout: function (checkoutId) {
+        const self = this;
+        const form = document.getElementById('card-form');
+        if (!form) return;
+
+        Worldpay.checkout.init(
+            {
+                id: checkoutId,
+                form: '#card-form',
+                fields: {
+                    pan: {
+                        selector: '#card-pan',
+                        placeholder: '4444 3333 2222 1111'
+                    },
+                    expiry: {
+                        selector: '#card-expiry',
+                        placeholder: 'MM/YY'
+                    },
+                    cvv: {
+                        selector: '#card-cvv',
+                        placeholder: '123'
+                    }
+                },
+                styles: {
+                    'input': {
+                        'color': '#33475b',
+                        'font-weight': '600',
+                        'font-size': '16px',
+                        'letter-spacing': '1px'
+                    },
+                    'input#pan': {
+                        'font-size': '18px'
+                    },
+                    'input.is-valid': {
+                        'color': '#28a745'
+                    },
+                    'input.is-invalid': {
+                        'color': '#dc3545'
+                    },
+                    'input.is-onfocus': {
+                        'color': '#33475b'
+                    }
+                },
+                acceptedCardBrands: ['amex', 'diners', 'discover', 'jcb', 'maestro', 'mastercard', 'visa'],
+                enablePanFormatting: true
+            },
+            function (error, checkout) {
+                if (error) {
+                    console.error(error);
+                    document.getElementById('form-error').textContent = 'Failed to initialize payment form. Please refresh the page.';
+                    document.getElementById('form-error').classList.add('show');
                     return;
                 }
                 
-                // For network errors or other exceptions, stop polling and show error popup
-                const errorMessage = error.message || 'Payment verification failed';
-                self._showErrorPopup(`Error: ${errorMessage}`);
+                // Setup form validation and submission
+                self._setupFormValidation(checkout);
+            }
+        );
+    },
+
+    /**
+     * Setup form validation and submission handling.
+     *
+     * @private
+     * @param {object} checkout - The Worldpay checkout instance
+     * @return {undefined}
+     */
+    _setupFormValidation: function (checkout) {
+        const self = this;
+        const form = document.getElementById('card-form');
+        const clearBtn = document.getElementById('clear');
+        const data = window._neatworldpayvt_data;
+
+        // Validation functions
+        const validators = {
+            cardholderName: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length < 1) return 'Cardholder name is required';
+                if (trimmed.length > 255) return 'Cardholder name must be 255 characters or less';
+                return '';
+            },
+            address: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length < 1) return 'Address is required';
+                if (trimmed.length > 80) return 'Address must be 80 characters or less';
+                return '';
+            },
+            address2: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length > 80) return 'Address line 2 must be 80 characters or less';
+                return '';
+            },
+            address3: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length > 80) return 'Address line 3 must be 80 characters or less';
+                return '';
+            },
+            city: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length < 1) return 'City is required';
+                if (trimmed.length > 50) return 'City must be 50 characters or less';
+                return '';
+            },
+            state: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length > 30) return 'State must be 30 characters or less';
+                return '';
+            },
+            postcode: function(value) {
+                const trimmed = (value || '').trim();
+                if (trimmed.length < 1) return 'Postcode is required';
+                if (trimmed.length > 15) return 'Postcode must be 15 characters or less';
+                return '';
+            },
+            country: function(value) {
+                if (!value) return 'Country is required';
+                return '';
             }
         };
-        
-        // Start polling
-        pollStatus();
-    },
 
-    /**
-     * Update the polling status in the popup.
-     *
-     * @private
-     * @param {string} status - The status message to display
-     * @return {undefined}
-     */
-    _updatePollingStatus(status) {
-        const statusElement = document.getElementById('polling-status');
-        if (statusElement) {
-            statusElement.textContent = status;
-            statusElement.style.display = 'block';
-        }
-    },
-
-    /**
-     * Stop the payment polling.
-     *
-     * @private
-     * @return {undefined}
-     */
-    _stopPaymentPolling() {
-        this._pollingActive = false;
-        if (this._pollingTimeout) {
-            clearTimeout(this._pollingTimeout);
-            this._pollingTimeout = null;
-        }
-        console.log('Payment polling stopped');
-    },
-
-    /**
-     * Show error popup and close the current virtual terminal popup.
-     *
-     * @private
-     * @param {string} errorMessage - The error message to display
-     * @return {undefined}
-     */
-    _showErrorPopup(errorMessage) {
-        // Stop polling first
-        this._stopPaymentPolling();
-        
-        // Close the current virtual terminal popup
-        const currentPopup = document.querySelector('#neatworldpayvt_popup');
-        if (currentPopup) {
-            currentPopup.style.display = 'none';
-        }
-        
-        // Create and show error popup
-        const errorPopup = document.createElement('div');
-        errorPopup.id = 'neatworldpayvt_error_popup';
-        errorPopup.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-        `;
-        
-        errorPopup.innerHTML = `
-            <div style="
-                background: white;
-                border-radius: 8px;
-                padding: 30px;
-                max-width: 500px;
-                width: 90%;
-                text-align: center;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-            ">
-                <div style="
-                    width: 60px;
-                    height: 60px;
-                    background: #dc3545;
-                    border-radius: 50%;
-                    margin: 0 auto 20px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                ">
-                    <span style="color: white; font-size: 24px;">⚠️</span>
-                </div>
-                
-                <h3 style="
-                    margin: 0 0 15px 0;
-                    color: #dc3545;
-                    font-size: 18px;
-                ">Payment Error</h3>
-                
-                <p style="
-                    margin: 0 0 25px 0;
-                    color: #666;
-                    font-size: 14px;
-                    line-height: 1.5;
-                ">${errorMessage}</p>
-                
-                <button type="button" 
-                        onclick="closeErrorPopup()" 
-                        style="
-                            background: #dc3545;
-                            color: white;
-                            border: none;
-                            border-radius: 4px;
-                            padding: 12px 24px;
-                            cursor: pointer;
-                            font-size: 14px;
-                            transition: background-color 0.2s;
-                        "
-                        onmouseover="this.style.background='#c82333'"
-                        onmouseout="this.style.background='#dc3545'">
-                    Close
-                </button>
-            </div>
-        `;
-        
-        // Add to body
-        document.body.appendChild(errorPopup);
-        
-        // Add close function to global scope
-        window.closeErrorPopup = function() {
-            const popup = document.getElementById('neatworldpayvt_error_popup');
-            if (popup) {
-                popup.remove();
+        function showFieldError(fieldId, errorMessage) {
+            const field = document.getElementById(fieldId);
+            const errorElement = document.getElementById(fieldId + '-error');
+            if (errorMessage) {
+                errorElement.textContent = errorMessage;
+                errorElement.classList.add('show');
+                field.classList.add('error');
+            } else {
+                errorElement.textContent = '';
+                errorElement.classList.remove('show');
+                field.classList.remove('error');
             }
-        };
+        }
+
+        // Add real-time validation
+        Object.keys(validators).forEach(function(fieldId) {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                field.addEventListener('input', function() {
+                    const error = validators[fieldId](this.value);
+                    showFieldError(fieldId, error);
+                });
+            }
+        });
+
+        // Form submission
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // Validate all fields
+            let hasErrors = false;
+            Object.keys(validators).forEach(function(fieldId) {
+                const field = document.getElementById(fieldId);
+                if (field) {
+                    const error = validators[fieldId](field.value);
+                    if (error) {
+                        showFieldError(fieldId, error);
+                        hasErrors = true;
+                    }
+                }
+            });
+
+            if (hasErrors) return;
+
+            // Disable submit, clear, and cancel buttons
+            const submitButton = form.querySelector('.submit');
+            const clearButton = document.getElementById('clear');
+            const cancelButton = document.getElementById('cancel');
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
+            if (clearButton) clearButton.disabled = true;
+            if (cancelButton) cancelButton.disabled = true;
+
+            // Generate session state
+            checkout.generateSessionState(function(error, sessionState) {
+                if (error) {
+                    console.error(error);
+                    document.getElementById('form-error').textContent = 'Failed to process payment. Please try again.';
+                    document.getElementById('form-error').classList.add('show');
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Charge Customer';
+                    if (clearButton) clearButton.disabled = false;
+                    if (cancelButton) cancelButton.disabled = false;
+                    return;
+                }
+
+                // Submit payment data to backend via form POST
+                const submitForm = document.createElement('form');
+                submitForm.method = 'POST';
+                submitForm.action = '/neatworldpayvt/process-payment';
+                
+                const fields = {
+                    transaction_reference: data.transactionReference,
+                    transaction_key: data.transactionKey,
+                    sessionState: sessionState,
+                    cardholderName: document.getElementById('cardholderName').value.trim(),
+                    address: document.getElementById('address').value.trim(),
+                    address2: document.getElementById('address2').value.trim(),
+                    address3: document.getElementById('address3').value.trim(),
+                    city: document.getElementById('city').value.trim(),
+                    state: document.getElementById('state').value.trim(),
+                    country: document.getElementById('country').value,
+                    postcode: document.getElementById('postcode').value.trim()
+                };
+                
+                Object.keys(fields).forEach(function(key) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = fields[key];
+                    submitForm.appendChild(input);
+                });
+                
+                document.body.appendChild(submitForm);
+                submitButton.disabled = true;
+                if (clearButton) clearButton.disabled = true;
+                if (cancelButton) cancelButton.disabled = true;
+                submitForm.submit();
+            });
+        });
+
+        // Clear button
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function(event) {
+                event.preventDefault();
+                checkout.clearForm(function() {
+                    document.getElementById('cardholderName').value = '';
+                    const billingAddress = data.billingAddress || {};
+                    document.getElementById('address').value = billingAddress.addressLine || '';
+                    document.getElementById('address2').value = billingAddress.addressLine2 || '';
+                    document.getElementById('address3').value = '';
+                    document.getElementById('city').value = billingAddress.city || '';
+                    document.getElementById('state').value = billingAddress.state || '';
+                    document.getElementById('country').value = data.countryCode || '';
+                    document.getElementById('postcode').value = billingAddress.postalCode || '';
+                    
+                    document.querySelectorAll('.error-message').forEach(function(el) {
+                        el.classList.remove('show');
+                    });
+                    document.querySelectorAll('input, select').forEach(function(el) {
+                        el.classList.remove('error');
+                    });
+                });
+            });
+        }
+        
+        // Cancel button
+        const cancelBtn = document.getElementById('cancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function(event) {
+                event.preventDefault();
+                self.closeVirtualTerminalPopup();
+            });
+        }
+    },
+
+    /**
+     * Close virtual terminal popup.
+     */
+    closeVirtualTerminalPopup: function() {
+        const popup = document.querySelector('#neatworldpayvt_popup');
+        if (popup) {
+            popup.style.display = 'none';
+        }
     },
 
 });
+
+// Add close function to global scope
+window.closeVirtualTerminalPopup = function() {
+    const popup = document.querySelector('#neatworldpayvt_popup');
+    if (popup) {
+        popup.style.display = 'none';
+    }
+};

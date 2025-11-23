@@ -4,274 +4,322 @@
 # Odoo is a trademark of Odoo S.A.
 
 import base64
-import binascii
-import hashlib
-import hmac
 import json
 import logging
-import pprint
-import time
 import re
 import requests
+import time
 from decimal import Decimal
 from odoo.http import request
-from odoo import _, http, fields, sql_db
-from contextlib import closing
+from odoo import _, http, fields
 from odoo.exceptions import ValidationError
-from datetime import datetime
 
 _logger = logging.getLogger(__name__)
 
 
 class NeatWorldpayVTController(http.Controller):
-
-    result_action = "/neatworldpayvt/result"
-    _REFERENCE_PREFIX = "SNSVT-"
-    _MAX_REFERENCE_LENGTH = 20
-
-    def _prefix_if_allowed(self, reference):
-        if not reference.startswith(self._REFERENCE_PREFIX) and len(reference) + len(self._REFERENCE_PREFIX) <= self._MAX_REFERENCE_LENGTH:
-            return self._REFERENCE_PREFIX + reference
-        else:
-            return reference
-    
-    def _search_backwards_for_transaction(self, original_reference, provider, expected_amount=None):
-        """
-        Search backwards through transaction references if the original reference ends with -{number}.
-        Loops from the number down to 0, trying each reference with a 500ms delay.
-        If the reference doesn't end with -{number}, makes a single request for the original reference.
-        
-        :param str original_reference: The original transaction reference
-        :param object provider: The payment provider object
-        :param float expected_amount: The expected payment amount to verify
-        :return: tuple (found_reference, response_data) or (None, None) if not found
-        """
-        # Check if reference ends with -{number}
-        match = re.match(r'^(.+)-(\d+)$', original_reference)
-        if not match:
-            reference_to_try = self._prefix_if_allowed(original_reference)
-            return self._try_single_reference(reference_to_try, provider, expected_amount)
-        
-        base_reference = match.group(1)
-        start_number = int(match.group(2))
-        
-        _logger.info(f"Starting backward search for base reference: {base_reference}, starting from: {start_number}")
-        
-        # Search backwards from start_number to 0
-        for i in range(start_number, -1, -1):
-            if i == 0:
-                # For 0, use the base reference without any suffix
-                test_reference = self._prefix_if_allowed(base_reference)
-            else:
-                # For other numbers, append -{number}
-                test_reference = self._prefix_if_allowed(f"{base_reference}-{i}")
-            
-            result = self._try_single_reference(test_reference, provider, expected_amount)
-            if result[1] is not None:  # If we found a payment
-                return result
-            
-            # Wait 100ms before next call (except for the last iteration)
-            if i > 0:
-                time.sleep(0.1)
-        
-        _logger.warning(f"No successful transaction found in backward search for base: {base_reference}")
-        return None, None
-
-    def _try_single_reference(self, reference, provider, expected_amount=None):
-        """
-        Try to find a payment for a single reference.
-        
-        :param str reference: The transaction reference to check
-        :param object provider: The payment provider object
-        :param float expected_amount: The expected payment amount to verify
-        :return: tuple (reference, response_data) or (reference, None) if not found
-        """
-        # Check if this reference has already been processed
-        neat_payment_model = request.env['neatworldpayvt.payment'].sudo()
-        if neat_payment_model.is_reference_processed(reference):
-            _logger.info(f"Reference {reference} has already been processed, skipping")
-            return reference, None
-        
-        # Prepare headers for Worldpay API calls
-        basicTokenUnencoded = provider.neatworldpayvt_username + ":" + provider.neatworldpayvt_password
-        basicToken = base64.b64encode(basicTokenUnencoded.encode("utf-8")).decode()
-        
-        headers = {
-            "Authorization": "Basic " + basicToken,
-            "Accept": "application/vnd.worldpay.payment-queries-v1.hal+json",
-            "User-Agent": "neatapps"
-        }
-        
-        # Determine base URL based on provider state
-        base_url = "https://try.access.worldpay.com/paymentQueries/payments"
-        if provider.state == "enabled":
-            base_url = "https://access.worldpay.com/paymentQueries/payments"
-        
-        worldpay_url = f"{base_url}?transactionReference={reference}"
-        
-        try:
-            _logger.info(f"Trying reference: {reference}")
-            response = requests.get(worldpay_url, headers=headers, timeout=10)
-            
-            # Check if we got a successful response (status 200)
-            if response.ok:
-                response_data = response.json()
-                _logger.info(f"Found successful response for reference: {reference}")
-                _logger.info(f"Response data: {json.dumps(response_data, indent=2)}")
-                
-                if not response_data or '_embedded' not in response_data:
-                    _logger.error("Invalid response structure: missing _embedded")
-                    raise ValidationError(_("Invalid payment response structure"))
-                
-                payments = response_data.get('_embedded', {}).get('payments', [])
-                if payments:
-                    # Verify that there's a payment in the response
-                    if self._verify_payment_in_response(response_data, expected_amount):
-                        return reference, payments
-                    else:
-                        return reference, None
-            
-            _logger.info(f"No success for reference: {reference}, status: {response.status_code}")
-            return reference, None
-                
-        except Exception as e:
-            _logger.error(f"Error checking reference {reference}: {e}")
-            return reference, None
-
-    def _verify_payment_in_response(self, response_data, expected_amount=None):
-        """
-        Verify that there's a payment in the response and optionally check the amount.
-        
-        :param dict response_data: The response data from Worldpay API
-        :param float expected_amount: The expected payment amount to verify
-        :return: bool: True if payment is valid, raises ValidationError otherwise
-        """
-        try:
-            payments = response_data.get('_embedded', {}).get('payments', [])
-            payment = payments[0]  # Get the first payment
-            _logger.info(f"Found payment: {payment.get('transactionReference')}")
-            
-            # If expected amount is provided, verify it matches
-            if expected_amount is not None:
-                payment_amount = payment.get('value', {}).get('amount')
-                payment_currency = payment.get('value', {}).get('currency')
-                
-                if payment_amount is None:
-                    _logger.error("Payment amount not found in response")
-                    raise ValidationError(_("Payment amount not found in response"))
-                
-                if payment_currency is None:
-                    _logger.error("Payment currency not found in response")
-                    raise ValidationError(_("Payment currency not found in response"))
-                
-                # Validate currency
-                expected_currency = 'GBP'  # You might want to get this from the transaction
-                if payment_currency != expected_currency:
-                    _logger.error(f"Currency mismatch: expected {expected_currency}, got {payment_currency}")
-                    raise ValidationError(_("Currency mismatch: expected %s, got %s") % (expected_currency, payment_currency))
-                
-                # Convert expected amount to pence using Decimal for accuracy
-                decimal_amount = Decimal(str(expected_amount)) * Decimal('100')
-                expected_amount_pence = int(decimal_amount)
-                
-                # if payment_amount != expected_amount_pence:
-                #     _logger.error(f"Amount mismatch: expected {expected_amount_pence} pence, got {payment_amount} pence")
-                #     raise ValidationError(_("Amount mismatch: expected %s pence, got %s pence") % (expected_amount_pence, payment_amount))
-                
-                _logger.info(f"Amount verification successful: {payment_amount} pence ({payment_currency})")
-            
-            return True
-            
-        except ValidationError:
-            # Re-raise ValidationError to be caught by the calling method
-            raise
-        except Exception as e:
-            _logger.error(f"Error verifying payment in response: {e}")
-            raise ValidationError(_("Error verifying payment in response"))
+    _allowed_ips = [
+        '34.246.73.11', '52.215.22.123', '52.31.61.0', '18.130.125.132',
+        '35.176.91.145', '52.56.235.128', '18.185.7.67', '18.185.134.117',
+        '18.185.158.215', '52.48.6.187', '34.243.65.63', '3.255.13.18',
+        '3.251.36.74', '63.32.208.6', '52.19.45.138', '3.11.50.124',
+        '3.11.213.43', '3.14.190.43', '3.121.172.32', '3.125.11.252',
+        '3.126.98.120', '3.139.153.185', '3.139.255.63', '13.200.51.10',
+        '13.200.56.25', '13.232.151.127', '34.236.63.10', '34.253.172.98',
+        '35.170.209.108', '35.177.246.6', '52.4.68.25', '52.51.12.88',
+        '108.129.30.203'
+    ]
 
     @http.route(
-        result_action + "/<path:reference>",
-        type="json",
-        auth="user",
-         methods=['POST']
+        "/neatworldpayvt/wh", type="http", auth="public", csrf=False, methods=["POST", "GET"]
     )
-    def neatworldpayvt_result(self, reference, transaction_key, **kwargs):
-        _logger.info(f"\n Redirect Path {request.httprequest.path} \n")
-        _logger.info(f"\n Kwargs {kwargs} \n")
-        
-        original_reference = reference
-        if not original_reference:
-            return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
-        
-        if original_reference.startswith('SNSVT-'):
-            original_reference = original_reference[6:]  # Remove 'SNSVT-' (6 characters)
-            _logger.info(f"Removed SNSVT- prefix, new reference: {original_reference}")
-        # First, try to find the transaction with the original reference
-        res = (
-            request.env["payment.transaction"]
-            .sudo()
-            .search([
-                ("reference", "=", original_reference),
-                ("provider_code", "=", "neatworldpayvt"),
-                ("state", "in", ["draft", "done"])
-            ], limit=1)
-        )
-        
-        if not res:
-            _logger.warning(f"No transaction found for reference: {original_reference}")
-            return {'status': 400, 'data': { 'error': 'Payment transaction not found' }}
-        
-        # Validate transaction key based on status
-        if not res.neatworldpayvt_validation_hash or not res.neatworldpayvt_validate_transaction_key(transaction_key):
-            return {'status': 403, 'data': { 'error': 'Forbidden' }}
-        
-        # Get the expected amount from the transaction
-        expected_amount = res.amount if hasattr(res, 'amount') else None
-        response_data = None
-        # Search backwards for the actual transaction reference
-        try:
-            found_reference, response_data = self._search_backwards_for_transaction(original_reference, res.provider_id, expected_amount)
-            
-            if found_reference is None or response_data is None or len(response_data) == 0:
-                _logger.error(f"Payment not found")
-                return {'status': 404, 'data': { 'error': 'Payment not found' }}
-                
-        except ValidationError as e:
-            # Payment verification failed, return 400 error
-            _logger.error(f"Payment verification failed: {e}")
-            return {'status': 400, 'data': { 'error': str(e) }}
-        
-        amount = response_data[0]['value']['amount']
-        currency = response_data[0]['value'].get('currency', 'GBP')
-        result_state = 'done'
+    def neatworldpayvt_wh(self, **kwargs):
+        client_ip = request.httprequest.remote_addr
+        _logger.info(f"\n Client IP {client_ip} \n")
+        if client_ip not in self._allowed_ips:
+            return request.make_json_response({
+                'error': 'Forbidden',
+                'message': 'Forbidden'
+            }, status=403)
 
-        # Store the payment record to prevent duplicate processing
+        response = request.get_json_data()
+        _logger.info(f"\n WH Response {response} \n")
         try:
-            neat_payment_model = request.env['neatworldpayvt.payment'].sudo()
-            neat_payment_model.create_payment_record(
-                worldpay_reference=found_reference,
-                odoo_reference=original_reference,
-                amount=amount,
-                currency=currency,
-                provider_id=res.provider_id.id,
-                transaction_id=res.id
+            event_details = response.get("eventDetails") if response else False
+            if not event_details:
+                return request.make_json_response({
+                    'error': 'Bad Request',
+                    'message': 'Bad Request'
+                }, status=400)
+
+            transaction_reference = event_details.get("transactionReference", False)
+            res = (
+                request.env["payment.transaction"]
+                .sudo()
+                .search([
+                    ("reference", "=", transaction_reference),
+                    ("provider_code", "in", ["neatworldpayvt", "neatworldpay"]),
+                    ("state", "not in", ["cancel", "error"])
+                ], limit=1)
             )
-            _logger.info(f"Stored payment record for Worldpay reference: {found_reference}")
-        except Exception as e:
-            _logger.error(f"Error storing payment record for {found_reference}: {e}")
-            # Continue processing even if storage fails
-        decimal_amount = Decimal(str(amount)) / Decimal('100')
-        amount_float = float(decimal_amount)
-        _logger.info(f"Amount float: {amount_float}")
-        data = {
-            'reference': kwargs.get("reference", False),
-            'result_state': result_state,
-            'paid_amount': amount_float
-        }
-        
-        # try:
-        res.sudo()._process("neatworldpayvt", data)
-        # except Exception as e:
-        #     _logger.error(f"Error handling notification data for transaction {res.reference}: {e}")
 
-        return {'status': 200, 'data': { 'message': 'Payment received' }}
+            if res:
+                state = event_details.get("type", False)
+                tokenization = event_details.get("tokenPaymentInstrument", False)
+                if state and state not in ("sentForAuthorization", "sentForSettlement"):
+                    if state == "authorized":
+                        count = 0
+                        _logger.info(f"\n WH State is Authorized {res.reference} \n")
+                        while count < 30:
+                            if not res or res.state == "done":
+                                _logger.info(f"\n Transaction was finished while waiting for pending status {res.reference} \n")
+                                return request.make_json_response({
+                                    'error': 'OK',
+                                    'message': 'OK'
+                                }, status=200)
+                            _logger.info(f"\n Current RES State is {res.state} {res.reference} \n")
+                            if res.state == "pending":
+                                break
+                            time.sleep(1)
+                            request.env.cr.commit()
+                            res = (
+                                request.env["payment.transaction"]
+                                .sudo()
+                                .search([
+                                    ("reference", "=", transaction_reference),
+                                    ("provider_code", "in", ["neatworldpayvt", "neatworldpay"]),
+                                    ("state", "not in", ["done", "cancel", "error"])
+                                ], limit=1)
+                            )
+                            count += 1
+                    if state == "sentForAuthorization":
+                        state = 'pending'
+                    elif state == "authorized":
+                        state = "done"
+                    elif state == "cancelled":
+                        state = 'cancel'
+                    else:
+                        state = 'error'
+
+                    if res.state == "done" and state in ('cancel', 'error'):
+                        sale_order_ref = res.reference.split("-")[0]
+                        _logger.info(f"\n Transaction Cancelled after done {sale_order_ref} \n")
+                        target_record = request.env["sale.order"].sudo().search([("name", "=", sale_order_ref)], limit=1)
+                        record_label = 'sale order'
+                        if not target_record:
+                            target_record = (
+                                request.env["account.move"]
+                                .sudo()
+                                .search([
+                                    '|',
+                                    ('name', '=', sale_order_ref),
+                                    ('invoice_origin', '=', sale_order_ref)
+                                ], limit=1)
+                            )
+                            record_label = 'invoice' if target_record else None
+                        if target_record:
+                            _logger.info(f"\n {record_label.title()} Found for cancelled transaction creating activity {sale_order_ref} {target_record} \n")
+                            user_id = None
+                            if target_record.user_id:
+                                user_id = target_record.user_id.id
+                            elif res.provider_id.neatworldpayvt_fallback_user_id:
+                                user_id = int(res.provider_id.neatworldpayvt_fallback_user_id)
+                            target_record.activity_schedule(
+                                act_type_xmlid='mail.mail_activity_data_todo',
+                                user_id=user_id,
+                                date_deadline=fields.Date.today(),
+                                summary="Payment Failed - Action Required",
+                                note=f"The payment failed after initial confirmation {res.reference}. Please review and take action."
+                            )
+
+                    notification_data = {
+                        'reference': transaction_reference,
+                        'result_state': state
+                    }
+                    res.sudo()._process("neatworldpayvt", notification_data)
+                elif not state and tokenization:
+                    _logger.info(f"\n Tokenization event received but is not supported for VT {transaction_reference} \n")
+            else:
+                _logger.warning(f"[WH] Transaction not found for reference: {transaction_reference}")
+        except ValidationError:
+            return request.make_json_response({
+                'error': 'Bad Request',
+                'message': 'Bad Request'
+            }, status=400)
+
+        return request.make_json_response({
+            'error': 'OK',
+            'message': 'OK'
+        }, status=200)
+
+
+
+    @http.route(
+        '/neatworldpayvt/process-payment',
+        type='http',
+        auth='public',
+        methods=['POST'],
+        csrf=False
+    )
+    def neatworldpayvt_process_payment(self, transaction_reference=None, transaction_key=None, sessionState=None, cardholderName=None, address=None, address2=None, address3=None, city=None, state=None, country=None, postcode=None, **kwargs):
+        """Process MOTO payment from virtual terminal form."""
+        try:
+            _logger.info(f"\n Process Payment Path {request.httprequest.path} \n")
+            _logger.info(f"\n Kwargs {kwargs} \n")
+            
+            # Get params from POST data
+            if not transaction_reference:
+                transaction_reference = request.params.get('transaction_reference')
+                transaction_key = request.params.get('transaction_key')
+                sessionState = request.params.get('sessionState')
+                cardholderName = request.params.get('cardholderName')
+                address = request.params.get('address')
+                address2 = request.params.get('address2', '')
+                address3 = request.params.get('address3', '')
+                city = request.params.get('city')
+                state = request.params.get('state', '')
+                country = request.params.get('country')
+                postcode = request.params.get('postcode')
+            
+            # Use the parameters (either from function args or extracted from params)
+            session_state = sessionState
+            cardholder_name = cardholderName
+            
+            if not transaction_reference or not transaction_key or not session_state:
+                _logger.error(f"[PROCESS_PAYMENT] Missing required parameters - reference: {transaction_reference}, key: {bool(transaction_key)}, session: {bool(session_state)}")
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Missing required parameters")
+                return request.redirect('/payment/status')
+            
+            # Find the transaction
+            transaction = (
+                request.env["payment.transaction"]
+                .sudo()
+                .search([
+                    ("reference", "=", transaction_reference),
+                    ("provider_code", "=", "neatworldpayvt"),
+                    ("state", "=", "draft")
+                ], limit=1)
+            )
+            
+            if not transaction:
+                _logger.warning(f"[PROCESS_PAYMENT] Transaction not found for reference: {transaction_reference}")
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Transaction not found")
+                return request.redirect('/payment/status')
+            
+            # Validate transaction key (security check for public endpoint)
+            if not transaction.neatworldpayvt_validation_hash or not transaction.neatworldpayvt_validate_transaction_key(transaction_key):
+                _logger.warning(f"[PROCESS_PAYMENT] Invalid transaction key for reference: {transaction_reference}")
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Invalid transaction key")
+                return request.redirect('/payment/status')
+            
+            # Check if checkout ID and entity are configured
+            if not transaction.provider_id.neatworldpayvt_checkout_id or not transaction.provider_id.neatworldpayvt_entity:
+                _logger.warning(f"[PROCESS_PAYMENT] Payment provider not properly configured for reference: {transaction_reference}")
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment provider not properly configured")
+                return request.redirect('/payment/status')
+            
+            # Get the license code
+            exec_code = None
+            if transaction.provider_id.neatworldpayvt_cached_code:
+                exec_code = transaction.provider_id.neatworldpayvt_cached_code
+            elif transaction.provider_id.neatworldpayvt_activation_code:
+                try:
+                    headers = {
+                        "Referer": transaction.company_id.website,
+                        "Authorization": transaction.provider_id.neatworldpayvt_activation_code
+                    }
+                    response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+                    
+                    if response.status_code == 200:
+                        exec_code = response.text
+                        transaction.provider_id.write({"neatworldpayvt_cached_code": exec_code})
+                    else:
+                        _logger.error(f"Failed to fetch activation code: {response.status_code} - {response.text}")
+                        _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Failed to fetch activation code (status {response.status_code})")
+                        return request.redirect('/payment/status')
+                except requests.RequestException as e:
+                    _logger.error(f"Request error: {e}")
+                    _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Request exception when fetching activation code")
+                    return request.redirect('/payment/status')
+            
+            if not exec_code:
+                _logger.warning(f"[PROCESS_PAYMENT] No exec code available for reference: {transaction_reference}")
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment configuration not available")
+                return request.redirect('/payment/status')
+            
+            # Execute the license code in payment processing mode
+            local_context = {
+                "tr": transaction,
+                "processing_values": {"reference": transaction_reference},
+                "session_state": session_state,
+                "cardholder_name": cardholder_name,
+                "address": address,
+                "address2": address2,
+                "address3": address3,
+                "city": city,
+                "state": state,
+                "country": country,
+                "postcode": postcode,
+                "Decimal": Decimal,
+                "requests": requests,
+                "base64": base64,
+                "re": re,
+                "env": transaction.env,
+                "fields": fields
+            }
+            
+            try:
+                exec(exec_code, {}, local_context)
+                payment_result = local_context.get("payment_result")
+                
+                _logger.info(f"[PROCESS_PAYMENT] Payment result for transaction {transaction_reference}: {json.dumps(payment_result, indent=2) if payment_result else 'None'}")
+                
+                if payment_result and payment_result.get("success"):
+                    # Payment successful
+                    outcome = payment_result.get("outcome", "authorized")
+                    response_data = payment_result.get("response", {})
+                    
+                    _logger.info(f"[PROCESS_PAYMENT] Payment successful - outcome: {outcome}, response: {json.dumps(response_data, indent=2)}")
+                    
+                    # Update transaction state
+                    notification_data = {
+                        'reference': transaction_reference,
+                        'result_state': 'done',
+                        'amount': int(Decimal(str(transaction.amount)) * Decimal('100'))
+                    }
+                    transaction.sudo()._process("neatworldpayvt", notification_data)
+                    
+                    _logger.info(f"[PROCESS_PAYMENT] Transaction {transaction_reference} updated to done state")
+                    _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment processed successfully (outcome: {outcome})")
+                    
+                    return request.redirect('/payment/status')
+                else:
+                    # Payment failed
+                    outcome = payment_result.get("outcome", "error") if payment_result else "error"
+                    _logger.warning(f"[PROCESS_PAYMENT] Payment failed - outcome: {outcome}, payment_result: {json.dumps(payment_result, indent=2) if payment_result else 'None'}")
+                    
+                    notification_data = {
+                        'reference': transaction_reference,
+                        'result_state': 'error'
+                    }
+                    transaction.sudo()._process("neatworldpayvt", notification_data)
+                    
+                    _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
+                    return request.redirect('/payment/status')
+                    
+            except Exception as e:
+                _logger.error(f"[PROCESS_PAYMENT] Error processing payment for {transaction_reference}: {e}", exc_info=True)
+                # Set transaction to error state
+                notification_data = {
+                    'reference': transaction_reference,
+                    'result_state': 'error'
+                }
+                transaction.sudo()._process("neatworldpayvt", notification_data)
+                
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Exception during payment processing")
+                return request.redirect('/payment/status')
+                
+        except Exception as e:
+            _logger.error(f"Error in process-payment endpoint: {e}", exc_info=True)
+            _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Exception in endpoint handler")
+            return request.redirect('/payment/status')
