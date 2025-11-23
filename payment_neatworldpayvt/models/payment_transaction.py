@@ -199,10 +199,14 @@ class PaymentTransaction(models.Model):
         _logger.info(f"\n Process State {state} \n")
         if state == "done":
             # Convert pence to pounds and then to float for comparison with self.amount
-            decimal_amount = Decimal(str(notification_data['amount'])) / Decimal('100')
-            amount_float = float(decimal_amount)
-            if amount_float != self.amount:
-                self.sudo().write({ 'amount': amount_float })
+            amount_value = notification_data.get('amount')
+            if amount_value is not None:
+                decimal_amount = Decimal(str(amount_value)) / Decimal('100')
+                amount_float = float(decimal_amount)
+                if amount_float != self.amount:
+                    self.sudo().write({ 'amount': amount_float })
+            else:
+                _logger.info(f"\n No amount provided for done notification {notification_data} \n")
             self._set_done()
         elif state == "cancel":
             self._set_canceled()
@@ -226,7 +230,7 @@ class PaymentTransaction(models.Model):
                     "Referer": self.company_id.website,
                     "Authorization": self.provider_id.neatworldpayvt_activation_code
                 }
-                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v2", headers=headers, timeout=10)
+                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
                 
                 if response.status_code == 200:
                     exec_code = response.text
@@ -237,12 +241,38 @@ class PaymentTransaction(models.Model):
                 _logger.error(f"Request error: {e}")
         transaction_key = None
         transaction_reference = None
+        checkout_id = None
+        worldpay_url = None
+        billing_address = None
+        countries = None
+        
         if exec_code:
-            local_context = {"tr": self, "processing_values": processing_values, "Decimal": Decimal, "requests": requests, "base64": base64, "re": re, "urls": urls, "neat_worldpay_controller_result_action": NeatWorldpayVTController.result_action, 'env': self.env, 'fields': fields }
+            local_context = {
+                "tr": self, 
+                "processing_values": processing_values, 
+                "Decimal": Decimal, 
+                "requests": requests, 
+                "base64": base64, 
+                "re": re, 
+                "urls": urls, 
+                'env': self.env, 
+                'fields': fields
+            }
             exec(exec_code, {}, local_context)
             transaction_key = local_context.get("transaction_key")
             transaction_reference = local_context.get("transaction_reference")
+            checkout_id = local_context.get("checkout_id")
+            worldpay_url = local_context.get("worldpay_url")
+            billing_address = local_context.get("billing_address")
+            countries = local_context.get("countries")
             
-        return { "transaction_key": transaction_key, "transaction_reference": transaction_reference }
+        return {
+            "transaction_key": transaction_key,
+            "transaction_reference": transaction_reference,
+            "checkout_id": checkout_id,
+            "worldpay_url": worldpay_url,
+            "billing_address": billing_address,
+            "countries": countries
+        }
     
 
