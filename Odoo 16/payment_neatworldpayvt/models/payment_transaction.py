@@ -198,10 +198,14 @@ class PaymentTransaction(models.Model):
         _logger.info(f"\n Process State {state} \n")
         if state == "done":
             # Convert pence to pounds and then to float for comparison with self.amount
-            decimal_amount = Decimal(str(notification_data['amount'])) / Decimal('100')
-            amount_float = float(decimal_amount)
-            if amount_float != self.amount:
-                self.sudo().write({ 'amount': amount_float })
+            amount_value = notification_data.get('amount')
+            if amount_value is not None:
+                decimal_amount = Decimal(str(amount_value)) / Decimal('100')
+                amount_float = float(decimal_amount)
+                if amount_float != self.amount:
+                    self.sudo().write({ 'amount': amount_float })
+            else:
+                _logger.info(f"\n No amount provided for done notification {notification_data} \n")
             self._set_done()
         elif state == "cancel":
             self._set_canceled()

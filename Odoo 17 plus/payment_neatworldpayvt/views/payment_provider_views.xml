@@ -57,6 +57,11 @@
                         string="Entity"
                         required="code == 'neatworldpayvt' and state != 'disabled'"
                     />
+                    <field
+                        name="neatworldpayvt_fallback_user_id"
+                        string="Fallback Failure VT User"
+                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                    />
                     <div class="alert alert-success" role="alert" colspan="2">
                         <b>By using this module you agree to our </b>
                         <a

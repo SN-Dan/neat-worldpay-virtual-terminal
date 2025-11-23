@@ -39,6 +39,18 @@ class PaymentProvider(models.Model):
         string="Entity", help="Worldpay merchant entity", required_if_provider='neatworldpayvt',
         groups='base.group_system')
 
+    @api.model
+    def _get_all_users_neatworldpayvt(self):
+        """Fetch all users and return them as selection options."""
+        users = self.env['res.users'].search([])  # Get all users
+        return [(str(user.id), user.name) for user in users]  # Store ID as string, show name
+
+    neatworldpayvt_fallback_user_id = fields.Selection(
+        selection=_get_all_users_neatworldpayvt,
+        string='Fallback Failure VT User',
+        help='Select a user who will receive an activity if a transaction fails for a sale order that does not have a salesperson.'
+    )
+
 
     def neatworldpayvt_get_code(self, activation_code):
         """ Get code. """

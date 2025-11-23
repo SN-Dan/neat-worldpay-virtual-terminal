@@ -114,6 +114,7 @@ paymentForm.include({
         const container = document.querySelector('#neatworldpayvt-container');
         if (!container) return;
 
+        const disclaimerText = _t("This payment channel is strictly for internal employee use. It must never be presented to customers and is not approved for ecommerce transactions.");
         const transactionReference = processingValues.transaction_reference || '';
         const transactionKey = processingValues.transaction_key || '';
         const checkoutId = processingValues.checkout_id || '';
@@ -344,6 +345,16 @@ paymentForm.include({
                     border-color: #f5c6cb;
                     color: #dc3545;
                 }
+                .disclaimer {
+                    font-size: 14px;
+                    background-color: #fff3cd;
+                    border: 1px solid #ffeeba;
+                    color: #856404;
+                    border-radius: 5px;
+                    padding: 12px 15px;
+                    margin-bottom: 20px;
+                    line-height: 1.4;
+                }
                 .checkout.hide-fields .label,
                 .checkout.hide-fields .field,
                 .checkout.hide-fields .form-group,
@@ -362,6 +373,7 @@ paymentForm.include({
                 <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #e9ecef;">
                     <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 600; color: #33475b;">Virtual Terminal Payment</h1>
                 </div>
+                <p class="disclaimer">${disclaimerText}</p>
                 
                 <form class="checkout" id="card-form">
                     <div class="label">Card number <span class="type"></span></div>

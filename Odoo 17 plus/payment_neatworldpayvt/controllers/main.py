@@ -59,7 +59,7 @@ class NeatWorldpayVTController(http.Controller):
                 .sudo()
                 .search([
                     ("reference", "=", transaction_reference),
-                    ("provider_code", "=", "neatworldpayvt"),
+                    ("provider_code", "in", ["neatworldpayvt", "neatworldpay"]),
                     ("state", "not in", ["cancel", "error"])
                 ], limit=1)
             )
@@ -88,7 +88,7 @@ class NeatWorldpayVTController(http.Controller):
                                 .sudo()
                                 .search([
                                     ("reference", "=", transaction_reference),
-                                    ("provider_code", "=", "neatworldpayvt"),
+                                    ("provider_code", "in", ["neatworldpayvt", "neatworldpay"]),
                                     ("state", "not in", ["done", "cancel", "error"])
                                 ], limit=1)
                             )
@@ -105,11 +105,27 @@ class NeatWorldpayVTController(http.Controller):
                     if res.state == "done" and state in ('cancel', 'error'):
                         sale_order_ref = res.reference.split("-")[0]
                         _logger.info(f"\n Transaction Cancelled after done {sale_order_ref} \n")
-                        sale_order = request.env["sale.order"].sudo().search([("name", "=", sale_order_ref)], limit=1)
-                        if sale_order:
-                            _logger.info(f"\n Sale Order Found for cancelled transaction creating activity {sale_order_ref} {sale_order} \n")
-                            user_id = sale_order.user_id.id if sale_order.user_id else None
-                            sale_order.activity_schedule(
+                        target_record = request.env["sale.order"].sudo().search([("name", "=", sale_order_ref)], limit=1)
+                        record_label = 'sale order'
+                        if not target_record:
+                            target_record = (
+                                request.env["account.move"]
+                                .sudo()
+                                .search([
+                                    '|',
+                                    ('name', '=', sale_order_ref),
+                                    ('invoice_origin', '=', sale_order_ref)
+                                ], limit=1)
+                            )
+                            record_label = 'invoice' if target_record else None
+                        if target_record:
+                            _logger.info(f"\n {record_label.title()} Found for cancelled transaction creating activity {sale_order_ref} {target_record} \n")
+                            user_id = None
+                            if target_record.user_id:
+                                user_id = target_record.user_id.id
+                            elif res.provider_id.neatworldpayvt_fallback_user_id:
+                                user_id = int(res.provider_id.neatworldpayvt_fallback_user_id)
+                            target_record.activity_schedule(
                                 act_type_xmlid='mail.mail_activity_data_todo',
                                 user_id=user_id,
                                 date_deadline=fields.Date.today(),
@@ -292,7 +308,7 @@ class NeatWorldpayVTController(http.Controller):
                     _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
                     return request.redirect('/payment/status')
                     
-        except Exception as e:
+            except Exception as e:
                 _logger.error(f"[PROCESS_PAYMENT] Error processing payment for {transaction_reference}: {e}", exc_info=True)
                 # Set transaction to error state
                 notification_data = {
