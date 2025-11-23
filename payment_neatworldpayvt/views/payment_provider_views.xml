@@ -47,6 +47,21 @@
                         password="True"
                         attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
                     />
+                    <field
+                        name="neatworldpayvt_checkout_id"
+                        string="Checkout ID"
+                        attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
+                    />
+                    <field
+                        name="neatworldpayvt_entity"
+                        string="Entity"
+                        attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
+                    />
+                    <field
+                        name="neatworldpayvt_fallback_user_id"
+                        string="Fallback Failure VT User"
+                        attrs="{'required': [('code', '=', 'neatworldpayvt'), ('state', '!=', 'disabled')]}"
+                    />
                     <div class="alert alert-success" role="alert" colspan="2">
                         <b>By using this module you agree to our </b>
                         <a
@@ -54,6 +69,12 @@
                             target="_blank">
                         terms and conditions
                         </a>
+                    </div>
+                    <div class="oe_structure" colspan="2">
+                        <p>
+                            Please make sure to set the following webhook in the Worldpay Dashboard:
+                        </p>
+                        <p><strong>{Odoo Server URL}/neatworldpayvt/wh</strong></p>
                     </div>
                 </group>
             </group>

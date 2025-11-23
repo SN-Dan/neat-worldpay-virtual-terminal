@@ -13,6 +13,8 @@
 
         <field name="neatworldpayvt_username">YourWorldpayUsername</field>
         <field name="neatworldpayvt_password">YourWorldpayPassword</field>
+        <field name="neatworldpayvt_checkout_id">YourCheckoutID</field>
+        <field name="neatworldpayvt_entity">YourEntity</field>
         <field name="neatworldpayvt_reset_code">False</field>
     </record>
 </odoo>
