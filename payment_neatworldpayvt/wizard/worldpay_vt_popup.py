@@ -26,7 +26,7 @@ class WorldpayVTPopup(models.TransientModel):
             rec.payment_page_html = False
             if rec.id:
                 rec.payment_page_html = (
-                    '<iframe '
+                    '<iframe id="neatworldpayvt-wizard-iframe" '
                     f'src="/neatworldpayvt/invoice_payment/{rec.id}" '
                     'style="width: 100%; min-height: 1180px; height: 92vh; border: 0; overflow: hidden;" '
                     'scrolling="no" '

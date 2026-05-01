@@ -45,6 +45,20 @@
                     }
                     const wizardId = root.dataset.wizardId || '';
 
+                    function vtResetWizardIframeSize() {
+                        try {
+                            var f = window.frameElement;
+                            if (!f) {
+                                return;
+                            }
+                            f.style.minHeight = '1180px';
+                            f.style.height = '92vh';
+                            f.style.maxHeight = '';
+                            f.style.overflow = 'hidden';
+                        } catch (e) {}
+                    }
+                    vtResetWizardIframeSize();
+
                     function closeModal() {
                         if (window.parent && window.parent !== window) {
                             const dialog = window.parent.document.querySelector('.modal');
@@ -110,6 +124,32 @@
                     if (!root || !container) {
                         return;
                     }
+
+                    function vtResetWizardIframeSize() {
+                        try {
+                            var f = window.frameElement;
+                            if (!f) {
+                                return;
+                            }
+                            f.style.minHeight = '1180px';
+                            f.style.height = '92vh';
+                            f.style.maxHeight = '';
+                            f.style.overflow = 'hidden';
+                        } catch (e) {}
+                    }
+                    function vtShrinkWizardIframeForResult() {
+                        try {
+                            var f = window.frameElement;
+                            if (!f) {
+                                return;
+                            }
+                            f.style.minHeight = '0';
+                            f.style.height = 'min(520px, 88vh)';
+                            f.style.maxHeight = '88vh';
+                            f.style.overflow = 'auto';
+                        } catch (e) {}
+                    }
+                    vtResetWizardIframeSize();
 
                     const data = {
                         transactionReference: root.dataset.transactionReference || '',
@@ -259,8 +299,8 @@
                         container.innerHTML = `
                             <style>
                                 body { margin: 0; font-family: Arial, sans-serif; }
-                                .result-overlay { position: fixed; inset: 0; background: rgba(255, 255, 255, 0.96); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 9999; box-sizing: border-box; }
-                                .result-wrap { width: 100%; max-width: 640px; text-align: center; background: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 28px 20px; box-sizing: border-box; }
+                                .result-overlay { position: fixed; top: 0; left: 0; right: 0; padding: 16px 20px; display: flex; justify-content: center; align-items: flex-start; background: rgba(255, 255, 255, 0.96); z-index: 9999; box-sizing: border-box; height: auto; }
+                                .result-wrap { width: 100%; max-width: 640px; max-height: 85vh; overflow-y: auto; text-align: center; background: #ffffff; border: 1px solid #e9ecef; border-radius: 8px; padding: 28px 20px; box-sizing: border-box; }
                                 .result-title { font-size: 22px; font-weight: 600; margin-bottom: 8px; color: ${success ? '#198754' : '#dc3545'}; }
                                 .result-message { font-size: 14px; color: #495057; margin-bottom: 20px; }
                                 .result-btn { cursor: pointer; color: white; outline: 0; font-size: 14px; border-radius: 4px; font-weight: 500; padding: 10px 16px; border: 1px solid #6c757d; background: #6c757d; min-width: 160px; }
@@ -273,6 +313,10 @@
                                 </div>
                             </div>
                         `;
+                        try { window.scrollTo(0, 0); } catch (e) {}
+                        if (document.documentElement) { document.documentElement.scrollTop = 0; }
+                        if (document.body) { document.body.scrollTop = 0; }
+                        vtShrinkWizardIframeForResult();
                         const closeButton = document.getElementById('vtResultClose');
                         if (closeButton) {
                             closeButton.addEventListener('click', function () {
