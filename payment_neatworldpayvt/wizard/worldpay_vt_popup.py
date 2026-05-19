@@ -70,3 +70,44 @@ class WorldpayVTPopup(models.TransientModel):
             'billing_address_json': json.dumps(processing_values.get('billing_address') or {}),
             'countries_json': json.dumps(processing_values.get('countries') or []),
         })
+
+    @api.model
+    def create_from_orders(self, orders):
+        orders = orders.sudo().exists()
+        if not orders:
+            raise ValidationError(_('Please select at least one sales order.'))
+        not_quotation = orders.filtered(lambda o: o.state not in ('draft', 'sent'))
+        if not_quotation:
+            raise ValidationError(_(
+                'WorldPay payment is only available for quotations (Draft or Quotation sent).'
+            ))
+        orders = orders.filtered(lambda o: o.state in ('draft', 'sent'))
+        if len(orders.mapped('partner_id')) > 1:
+            raise ValidationError(_('All selected orders must belong to the same customer.'))
+        if len(orders.mapped('currency_id')) > 1:
+            raise ValidationError(_('All selected orders must use the same currency.'))
+
+        provider = self.env['payment.provider'].sudo().search([
+            ('code', '=', 'neatworldpayvt'),
+            ('state', '!=', 'disabled'),
+        ], limit=1)
+        if not provider:
+            raise ValidationError(_('Worldpay virtual terminal provider is not configured.'))
+
+        virtual_payment = self.env['worldpay.virtual.payment'].sudo().create({
+            'provider_id': provider.id,
+            'status': 'draft',
+            'sale_order_ids': [(6, 0, orders.ids)],
+        })
+        processing_values = virtual_payment.neatworldpayvt_get_processing_values()
+        return self.sudo().create({
+            'provider_id': provider.id,
+            'virtual_payment_id': virtual_payment.id,
+            'reference': virtual_payment.reference,
+            'transaction_reference': processing_values.get('transaction_reference'),
+            'transaction_key': processing_values.get('transaction_key'),
+            'checkout_id': processing_values.get('checkout_id'),
+            'worldpay_url': processing_values.get('worldpay_url'),
+            'billing_address_json': json.dumps(processing_values.get('billing_address') or {}),
+            'countries_json': json.dumps(processing_values.get('countries') or []),
+        })

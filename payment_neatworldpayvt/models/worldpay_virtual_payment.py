@@ -29,7 +29,8 @@ class WorldpayVirtualPayment(models.Model):
         ('cancel', 'Cancelled'),
         ('error', 'Error'),
     ], string='Status', required=True, default='draft', index=True)
-    invoice_ids = fields.Many2many('account.move', string='Invoices', required=True)
+    invoice_ids = fields.Many2many('account.move', string='Invoices')
+    sale_order_ids = fields.Many2many('sale.order', string='Sales Orders')
     currency_id = fields.Many2one('res.currency', string='Currency', compute='_compute_payment_values', store=True)
     amount_total = fields.Monetary(string='Total Amount', currency_field='currency_id', compute='_compute_payment_values', store=True)
     amount = fields.Monetary(string='Amount', currency_field='currency_id', compute='_compute_payment_values', store=True)
@@ -38,12 +39,22 @@ class WorldpayVirtualPayment(models.Model):
         ('worldpay_virtual_payment_reference_uniq', 'unique(reference)', 'WorldPay virtual payment reference must be unique.'),
     ]
 
-    @api.depends('invoice_ids', 'invoice_ids.amount_residual', 'invoice_ids.currency_id', 'invoice_ids.partner_id')
+    @api.depends(
+        'invoice_ids', 'invoice_ids.amount_residual', 'invoice_ids.currency_id', 'invoice_ids.partner_id',
+        'sale_order_ids', 'sale_order_ids.amount_total', 'sale_order_ids.currency_id',
+        'sale_order_ids.partner_id', 'sale_order_ids.partner_invoice_id',
+    )
     def _compute_payment_values(self):
         for rec in self:
-            rec.currency_id = rec.invoice_ids[:1].currency_id
-            rec.partner_id = rec.invoice_ids[:1].partner_id
-            rec.amount_total = sum(rec.invoice_ids.mapped('amount_residual'))
+            if rec.sale_order_ids:
+                rec.currency_id = rec.sale_order_ids[:1].currency_id
+                order = rec.sale_order_ids[:1]
+                rec.partner_id = order.partner_invoice_id or order.partner_id
+                rec.amount_total = sum(rec.sale_order_ids.mapped('amount_total'))
+            else:
+                rec.currency_id = rec.invoice_ids[:1].currency_id
+                rec.partner_id = rec.invoice_ids[:1].partner_id
+                rec.amount_total = sum(rec.invoice_ids.mapped('amount_residual'))
             rec.amount = rec.amount_total
 
     def neatworldpayvt_generate_transaction_key(self):
