@@ -8,4 +8,5 @@ from . import payment_provider
 from . import payment_transaction
 from . import neatworldpayvt_payment
 from . import account_move
+from . import sale_order
 from . import worldpay_virtual_payment

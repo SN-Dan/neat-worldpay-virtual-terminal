@@ -44,6 +44,22 @@ class NeatWorldpayVTController(http.Controller):
     def _is_payment_link_reference(self, reference):
         return (reference or '').startswith('pl/')
 
+    def _confirm_sale_orders(self, orders):
+        orders = orders.filtered(lambda o: o.state in ('draft', 'sent'))
+        for order in orders:
+            order.action_confirm()
+
+    def _schedule_multi_order_failure_activity(self, orders, reference, fallback_user_id=False):
+        for order in orders:
+            user_id = order.user_id.id if order.user_id else (int(fallback_user_id) if fallback_user_id else None)
+            order.activity_schedule(
+                act_type_xmlid='mail.mail_activity_data_todo',
+                user_id=user_id,
+                date_deadline=fields.Date.today(),
+                summary="Payment Failed - Action Required",
+                note=f"The payment failed after initial confirmation {reference}. Please review and take action."
+            )
+
     def _schedule_multi_invoice_failure_activity(self, invoices, reference, fallback_user_id=False):
         for invoice in invoices:
             user_id = invoice.user_id.id if invoice.user_id else (int(fallback_user_id) if fallback_user_id else None)
@@ -68,6 +84,27 @@ class NeatWorldpayVTController(http.Controller):
             return True
         if result_state in ('pending', 'cancel', 'error'):
             payment.sudo().write({'status': result_state})
+        if payment.sale_order_ids:
+            orders = payment.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
+            order_names = ', '.join(payment.sale_order_ids.mapped('name'))
+            if result_state == 'done' and orders:
+                self._confirm_sale_orders(orders)
+                note_body = (
+                    f"Payment was made for reference {payment.reference}. "
+                    f"Multiple sales orders were paid together. "
+                    f"Sales orders in this virtual terminal payment: {order_names}"
+                )
+                admin_user = request.env.ref('base.user_admin')
+                for order in payment.sale_order_ids:
+                    order.with_user(admin_user).sudo().message_post(
+                        body=note_body,
+                        message_type='comment',
+                        subtype_xmlid='mail.mt_note',
+                    )
+                payment.sudo().write({'status': 'paid'})
+            elif result_state == 'done':
+                payment.sudo().write({'status': 'paid'})
+            return True
         invoices = payment.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
         invoice_names = ', '.join(payment.invoice_ids.mapped('name'))
         if result_state == 'done' and invoices:
@@ -117,6 +154,28 @@ class NeatWorldpayVTController(http.Controller):
 
         if result_state in ('pending', 'cancel', 'error'):
             link_rec.sudo().write({'status': result_state})
+
+        if link_rec.sale_order_ids:
+            orders = link_rec.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
+            order_names = ', '.join(link_rec.sale_order_ids.mapped('name'))
+            if result_state == 'done' and orders:
+                self._confirm_sale_orders(orders)
+                note_body = (
+                    f"Payment was made for reference {reference}. "
+                    f"Multiple sales orders were paid together. "
+                    f"Sales orders in this payment link: {order_names}"
+                )
+                admin_user = request.env.ref('base.user_admin')
+                for order in link_rec.sale_order_ids:
+                    order.with_user(admin_user).sudo().message_post(
+                        body=note_body,
+                        message_type='comment',
+                        subtype_xmlid='mail.mt_note',
+                    )
+                link_rec.sudo().write({'status': 'paid'})
+            elif result_state == 'done':
+                link_rec.sudo().write({'status': 'paid'})
+            return True
 
         invoices = link_rec.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
         invoice_names = ', '.join(link_rec.invoice_ids.mapped('name'))
@@ -288,11 +347,18 @@ class NeatWorldpayVTController(http.Controller):
                         count += 1
                 _logger.info(f"\n Link Record not found or status is {link_rec.status} {transaction_reference} \n")
                 if link_rec and link_rec.status == 'paid' and result_state in ('cancel', 'error'):
-                    self._schedule_multi_invoice_failure_activity(
-                        link_rec.invoice_ids,
-                        transaction_reference,
-                        link_rec.provider_id.neatworldpay_fallback_user_id
-                    )
+                    if link_rec.sale_order_ids:
+                        self._schedule_multi_order_failure_activity(
+                            link_rec.sale_order_ids,
+                            transaction_reference,
+                            link_rec.provider_id.neatworldpay_fallback_user_id
+                        )
+                    else:
+                        self._schedule_multi_invoice_failure_activity(
+                            link_rec.invoice_ids,
+                            transaction_reference,
+                            link_rec.provider_id.neatworldpay_fallback_user_id
+                        )
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'OK'
@@ -344,11 +410,18 @@ class NeatWorldpayVTController(http.Controller):
                         count += 1
                 if virtual_payment and virtual_payment.status == 'paid' and result_state in ('cancel', 'error'):
                     _logger.info(f"\n Virtual Payment Record found and status is {virtual_payment.status} {transaction_reference} \n")
-                    self._schedule_multi_invoice_failure_activity(
-                        virtual_payment.invoice_ids,
-                        transaction_reference,
-                        virtual_payment.provider_id.neatworldpayvt_fallback_user_id
-                    )
+                    if virtual_payment.sale_order_ids:
+                        self._schedule_multi_order_failure_activity(
+                            virtual_payment.sale_order_ids,
+                            transaction_reference,
+                            virtual_payment.provider_id.neatworldpayvt_fallback_user_id
+                        )
+                    else:
+                        self._schedule_multi_invoice_failure_activity(
+                            virtual_payment.invoice_ids,
+                            transaction_reference,
+                            virtual_payment.provider_id.neatworldpayvt_fallback_user_id
+                        )
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'OK'
