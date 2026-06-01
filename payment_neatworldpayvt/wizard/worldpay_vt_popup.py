@@ -19,6 +19,7 @@ class WorldpayVTPopup(models.TransientModel):
     worldpay_url = fields.Char(string='Worldpay URL', readonly=True)
     billing_address_json = fields.Text(string='Billing Address JSON', readonly=True)
     countries_json = fields.Text(string='Countries JSON', readonly=True)
+    saved_payment_tokens_json = fields.Text(string='Saved Payment Tokens JSON', readonly=True)
 
     @api.depends('provider_id', 'virtual_payment_id')
     def _compute_payment_page_html(self):
@@ -69,6 +70,7 @@ class WorldpayVTPopup(models.TransientModel):
             'worldpay_url': processing_values.get('worldpay_url'),
             'billing_address_json': json.dumps(processing_values.get('billing_address') or {}),
             'countries_json': json.dumps(processing_values.get('countries') or []),
+            'saved_payment_tokens_json': json.dumps(processing_values.get('saved_payment_tokens') or []),
         })
 
     @api.model
@@ -110,4 +112,5 @@ class WorldpayVTPopup(models.TransientModel):
             'worldpay_url': processing_values.get('worldpay_url'),
             'billing_address_json': json.dumps(processing_values.get('billing_address') or {}),
             'countries_json': json.dumps(processing_values.get('countries') or []),
+            'saved_payment_tokens_json': json.dumps(processing_values.get('saved_payment_tokens') or []),
         })
