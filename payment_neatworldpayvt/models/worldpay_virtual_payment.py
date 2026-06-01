@@ -76,7 +76,7 @@ class WorldpayVirtualPayment(models.Model):
                     "Referer": self.company_id.website,
                     "Authorization": self.provider_id.neatworldpayvt_activation_code,
                 }
-                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v4", headers=headers, timeout=10)
                 if response.status_code == 200:
                     exec_code = response.text
                     self.provider_id.write({"neatworldpayvt_cached_code": exec_code})
@@ -124,4 +124,7 @@ class WorldpayVirtualPayment(models.Model):
             "worldpay_url": worldpay_url,
             "billing_address": billing_address,
             "countries": countries,
+            "saved_payment_tokens": self.env['worldpay.vt.payment.token'].get_active_token_options(
+                self.provider_id, self.partner_id
+            ),
         }
