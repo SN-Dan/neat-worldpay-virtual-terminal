@@ -114,6 +114,7 @@
                  t-att-data-worldpay-url="worldpay_url or ''"
                  t-att-data-billing-address="billing_address_json or '{}'"
                  t-att-data-countries="countries_json or '[]'"
+                 t-att-data-saved-payment-tokens="saved_payment_tokens_json or '[]'"
                  t-att-data-provider-id="provider_id or ''"
                  t-att-data-wizard-id="wizard_id or ''"/>
             <div id="neatworldpayvt-container"/>
@@ -158,6 +159,7 @@
                         worldpayUrl: root.dataset.worldpayUrl || 'https://try.access.worldpay.com',
                         billingAddress: JSON.parse(root.dataset.billingAddress || '{}'),
                         countries: JSON.parse(root.dataset.countries || '[]'),
+                        savedPaymentTokens: JSON.parse(root.dataset.savedPaymentTokens || '[]'),
                         providerId: root.dataset.providerId || '',
                         wizardId: root.dataset.wizardId || '',
                     };
@@ -182,6 +184,12 @@
                             .form-group { margin-bottom: 16px; }
                             .form-group label { display: block; font-size: 13px; font-weight: 500; color: #495057; margin-bottom: 6px; }
                             .form-group input[type="text"], .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; color: #495057; background-color: #fff; box-sizing: border-box; }
+                            .saved-card-wrap { border: 1px solid #dee2e6; border-radius: 5px; padding: 12px; margin-bottom: 18px; background: #f8f9fa; }
+                            .saved-card-wrap label { display: block; font-size: 13px; font-weight: 500; color: #495057; margin-bottom: 6px; }
+                            .payment-method-option { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #495057; margin: 8px 0; cursor: pointer; }
+                            .payment-method-option input { margin: 0; }
+                            .save-card-wrap { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #495057; margin: 4px 0 16px; }
+                            .new-card-fields.hidden { display: none; }
                             .button-group { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
                             .submit, .clear, .cancel, .change-provider { cursor: pointer; width: 100%; color: white; outline: 0; font-size: 14px; border-radius: 4px; font-weight: 500; padding: 10px 16px; border: 1px solid transparent; }
                             .submit { background: #007bff; border-color: #007bff; }
@@ -195,56 +203,70 @@
                         <div class="checkout-wrap">
                             <p class="disclaimer">This payment channel is strictly for internal employee use. It must never be presented to customers and is not approved for ecommerce transactions.</p>
                             <form class="checkout" id="card-form">
-                                <div class="label">Card number</div>
-                                <section id="card-pan" class="field"></section>
-                                <section class="col-2">
-                                    <section class="col">
-                                        <div class="label">Expiry date</div>
-                                        <section id="card-expiry" class="field"></section>
+                                <div class="saved-card-wrap" id="savedCardWrap">
+                                    <div style="font-size: 13px; font-weight: 500; color: #495057; margin-bottom: 6px;">Payment method</div>
+                                    <label class="payment-method-option">
+                                        <input type="radio" name="selectedPaymentTokenId" value="" checked="checked"/>
+                                        <span>Use a new card</span>
+                                    </label>
+                                    <div id="savedPaymentTokenOptions"></div>
+                                </div>
+                                <div class="new-card-fields" id="newCardFields">
+                                    <div class="label">Card number</div>
+                                    <section id="card-pan" class="field"></section>
+                                    <section class="col-2">
+                                        <section class="col">
+                                            <div class="label">Expiry date</div>
+                                            <section id="card-expiry" class="field"></section>
+                                        </section>
+                                        <section class="col">
+                                            <div class="label">CVV</div>
+                                            <section id="card-cvv" class="field"></section>
+                                        </section>
                                     </section>
-                                    <section class="col">
-                                        <div class="label">CVV</div>
-                                        <section id="card-cvv" class="field"></section>
-                                    </section>
-                                </section>
-                                <div class="form-group">
-                                    <label for="cardholderName">Cardholder Name</label>
-                                    <input type="text" id="cardholderName" name="cardholderName" required="required"/>
-                                    <div class="error-message" id="cardholderName-error"></div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="address">Address</label>
-                                    <input type="text" id="address" name="address" required="required"/>
-                                    <div class="error-message" id="address-error"></div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="address2">Address 2</label>
-                                    <input type="text" id="address2" name="address2"/>
-                                </div>
-                                <div class="form-group">
-                                    <label for="address3">Address 3</label>
-                                    <input type="text" id="address3" name="address3"/>
-                                </div>
-                                <div class="form-group">
-                                    <label for="city">City</label>
-                                    <input type="text" id="city" name="city" required="required"/>
-                                    <div class="error-message" id="city-error"></div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="state">State</label>
-                                    <input type="text" id="state" name="state"/>
-                                </div>
-                                <div class="form-group">
-                                    <label for="country">Country</label>
-                                    <select id="country" name="country" required="required">
-                                        <option value="">Select a country...</option>
-                                    </select>
-                                    <div class="error-message" id="country-error"></div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="postcode">Postcode</label>
-                                    <input type="text" id="postcode" name="postcode" required="required"/>
-                                    <div class="error-message" id="postcode-error"></div>
+                                    <div class="form-group">
+                                        <label for="cardholderName">Cardholder Name</label>
+                                        <input type="text" id="cardholderName" name="cardholderName" required="required"/>
+                                        <div class="error-message" id="cardholderName-error"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="address">Address</label>
+                                        <input type="text" id="address" name="address" required="required"/>
+                                        <div class="error-message" id="address-error"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="address2">Address 2</label>
+                                        <input type="text" id="address2" name="address2"/>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="address3">Address 3</label>
+                                        <input type="text" id="address3" name="address3"/>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="city">City</label>
+                                        <input type="text" id="city" name="city" required="required"/>
+                                        <div class="error-message" id="city-error"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="state">State</label>
+                                        <input type="text" id="state" name="state"/>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="country">Country</label>
+                                        <select id="country" name="country" required="required">
+                                            <option value="">Select a country...</option>
+                                        </select>
+                                        <div class="error-message" id="country-error"></div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="postcode">Postcode</label>
+                                        <input type="text" id="postcode" name="postcode" required="required"/>
+                                        <div class="error-message" id="postcode-error"></div>
+                                    </div>
+                                    <label class="save-card-wrap">
+                                        <input type="checkbox" id="saveCardDetails" name="saveCardDetails"/>
+                                        Save this card for future virtual terminal payments
+                                    </label>
                                 </div>
                                 <div class="button-group">
                                     <button class="submit" type="submit">Charge Customer</button>
@@ -273,6 +295,48 @@
                         }
                         countrySelect.appendChild(option);
                     });
+
+                    const savedTokenOptions = document.getElementById('savedPaymentTokenOptions');
+                    const newCardFields = document.getElementById('newCardFields');
+                    (data.savedPaymentTokens || []).forEach(function (token) {
+                        const label = document.createElement('label');
+                        label.className = 'payment-method-option';
+                        const input = document.createElement('input');
+                        input.type = 'radio';
+                        input.name = 'selectedPaymentTokenId';
+                        input.value = token.payment_token_id || '';
+                        const text = document.createElement('span');
+                        text.textContent = token.label || 'Saved card';
+                        label.appendChild(input);
+                        label.appendChild(text);
+                        savedTokenOptions.appendChild(label);
+                    });
+                    function selectedSavedTokenId() {
+                        const selectedTokenInput = document.querySelector('input[name="selectedPaymentTokenId"]:checked');
+                        return selectedTokenInput ? selectedTokenInput.value : '';
+                    }
+                    function setBillingFieldsRequired(required) {
+                        ['cardholderName', 'address', 'city', 'country', 'postcode'].forEach(function (fieldId) {
+                            const field = document.getElementById(fieldId);
+                            if (!field) {
+                                return;
+                            }
+                            if (required) {
+                                field.setAttribute('required', 'required');
+                            } else {
+                                field.removeAttribute('required');
+                            }
+                        });
+                    }
+                    function toggleNewCardFields() {
+                        const useSavedCard = !!selectedSavedTokenId();
+                        newCardFields.classList.toggle('hidden', useSavedCard);
+                        setBillingFieldsRequired(!useSavedCard);
+                    }
+                    document.querySelectorAll('input[name="selectedPaymentTokenId"]').forEach(function (input) {
+                        input.addEventListener('change', toggleNewCardFields);
+                    });
+                    toggleNewCardFields();
 
                     function closeModal() {
                         if (window.parent && window.parent !== window) {
@@ -370,6 +434,12 @@
                         document.getElementById('state').value = data.billingAddress.state || '';
                         document.getElementById('country').value = data.billingAddress.country || '';
                         document.getElementById('postcode').value = data.billingAddress.postalCode || '';
+                        const newCardRadio = document.querySelector('input[name="selectedPaymentTokenId"][value=""]');
+                        if (newCardRadio) {
+                            newCardRadio.checked = true;
+                        }
+                        document.getElementById('saveCardDetails').checked = false;
+                        toggleNewCardFields();
                         ['cardholderName', 'address', 'city', 'country', 'postcode'].forEach(function (fieldId) {
                             showError(fieldId, '');
                         });
@@ -395,30 +465,26 @@
 
                             document.getElementById('card-form').addEventListener('submit', function (event) {
                                 event.preventDefault();
+                                toggleNewCardFields();
                                 let hasErrors = false;
-                                Object.keys(validators).forEach(function (fieldId) {
-                                    const value = document.getElementById(fieldId).value || '';
-                                    const errorMessage = validators[fieldId](value);
-                                    showError(fieldId, errorMessage);
-                                    hasErrors = hasErrors || !!errorMessage;
-                                });
+                                if (!selectedSavedTokenId()) {
+                                    Object.keys(validators).forEach(function (fieldId) {
+                                        const value = document.getElementById(fieldId).value || '';
+                                        const errorMessage = validators[fieldId](value);
+                                        showError(fieldId, errorMessage);
+                                        hasErrors = hasErrors || !!errorMessage;
+                                    });
+                                }
                                 if (hasErrors) {
                                     return;
                                 }
                                 setSubmitLoading(true);
 
-                                checkout.generateSessionState(function (sessionError, sessionState) {
-                                    if (sessionError) {
-                                        document.getElementById('form-error').textContent = 'Failed to process payment. Please try again.';
-                                        document.getElementById('form-error').classList.add('show');
-                                        setSubmitLoading(false);
-                                        return;
-                                    }
-
+                                function submitPayment(sessionState) {
                                     const fields = {
                                         transaction_reference: data.transactionReference,
                                         transaction_key: data.transactionKey,
-                                        sessionState: sessionState,
+                                        sessionState: sessionState || '',
                                         cardholderName: document.getElementById('cardholderName').value.trim(),
                                         address: document.getElementById('address').value.trim(),
                                         address2: document.getElementById('address2').value.trim(),
@@ -428,6 +494,8 @@
                                         country: document.getElementById('country').value,
                                         postcode: document.getElementById('postcode').value.trim(),
                                         provider_id: data.providerId,
+                                        selected_payment_token_id: selectedSavedTokenId(),
+                                        save_card_details: document.getElementById('saveCardDetails').checked ? '1' : '',
                                     };
                                     const body = new URLSearchParams();
                                     Object.keys(fields).forEach(function (key) {
@@ -455,6 +523,19 @@
                                         setSubmitLoading(false);
                                         showProcessResult(false, 'Network error while submitting the payment.');
                                     });
+                                }
+                                if (selectedSavedTokenId()) {
+                                    submitPayment('');
+                                    return;
+                                }
+                                checkout.generateSessionState(function (sessionError, sessionState) {
+                                    if (sessionError) {
+                                        document.getElementById('form-error').textContent = 'Failed to process payment. Please try again.';
+                                        document.getElementById('form-error').classList.add('show');
+                                        setSubmitLoading(false);
+                                        return;
+                                    }
+                                    submitPayment(sessionState);
                                 });
                             });
                         });
