@@ -786,7 +786,7 @@ class NeatWorldpayVTController(http.Controller):
                     self._save_token_from_payment_response(
                         virtual_payment, transaction_reference, payment_result, save_card_details, saved_payment_token
                     )
-                    self._handle_virtual_payment(virtual_payment, 'pending')
+                    self._handle_virtual_payment(virtual_payment, 'done')
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'Payment successful.'
