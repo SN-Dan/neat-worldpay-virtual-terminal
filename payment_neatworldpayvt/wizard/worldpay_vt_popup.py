@@ -78,12 +78,15 @@ class WorldpayVTPopup(models.TransientModel):
         orders = orders.sudo().exists()
         if not orders:
             raise ValidationError(_('Please select at least one sales order.'))
-        not_quotation = orders.filtered(lambda o: o.state not in ('draft', 'sent'))
-        if not_quotation:
-            raise ValidationError(_(
-                'WorldPay payment is only available for quotations (Draft or Quotation sent).'
-            ))
-        orders = orders.filtered(lambda o: o.state in ('draft', 'sent'))
+        fully_paid = orders.filtered(
+            lambda o: o.invoice_ids.filtered(lambda m: m.state == 'posted' and m.move_type == 'out_invoice')
+            and all(
+                o.currency_id.compare_amounts(inv.amount_residual, 0) <= 0
+                for inv in o.invoice_ids.filtered(lambda m: m.state == 'posted' and m.move_type == 'out_invoice')
+            )
+        )
+        if fully_paid:
+            raise ValidationError(_('This document is already fully paid.'))
         if len(orders.mapped('partner_id')) > 1:
             raise ValidationError(_('All selected orders must belong to the same customer.'))
         if len(orders.mapped('currency_id')) > 1:
@@ -101,6 +104,7 @@ class WorldpayVTPopup(models.TransientModel):
             'status': 'draft',
             'sale_order_ids': [(6, 0, orders.ids)],
         })
+        virtual_payment._create_sale_orders_payment_transaction()
         processing_values = virtual_payment.neatworldpayvt_get_processing_values()
         return self.sudo().create({
             'provider_id': provider.id,

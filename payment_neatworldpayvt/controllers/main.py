@@ -156,11 +156,13 @@ class NeatWorldpayVTController(http.Controller):
             return True
         if result_state in ('pending', 'cancel', 'error'):
             payment.sudo().write({'status': result_state})
+            if payment.sale_order_ids and result_state in ('cancel', 'error'):
+                payment._cancel_sale_orders_payment_transaction()
         if payment.sale_order_ids:
             orders = payment.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
             order_names = ', '.join(payment.sale_order_ids.mapped('name'))
             if result_state == 'done' and orders:
-                self._confirm_sale_orders(orders)
+                payment._complete_sale_orders_payment_transaction()
                 note_body = (
                     f"Payment was made for reference {payment.reference}. "
                     f"Multiple sales orders were paid together. "
@@ -175,22 +177,13 @@ class NeatWorldpayVTController(http.Controller):
                     )
                 payment.sudo().write({'status': 'paid'})
             elif result_state == 'done':
+                payment._complete_sale_orders_payment_transaction()
                 payment.sudo().write({'status': 'paid'})
             return True
         invoices = payment.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
         invoice_names = ', '.join(payment.invoice_ids.mapped('name'))
         if result_state == 'done' and invoices:
-            wizard_ctx = {
-                'active_model': 'account.move',
-                'active_ids': invoices.ids,
-                'active_id': invoices.ids[0],
-            }
-            register_wizard_vals = {}
-            if payment.provider_id.journal_id:
-                register_wizard_vals['journal_id'] = payment.provider_id.journal_id.id
-            register_wizard_vals['group_payment'] = True
-            register_wizard = request.env['account.payment.register'].sudo().with_context(**wizard_ctx).create(register_wizard_vals)
-            register_wizard._create_payments()
+            payment._complete_sale_orders_payment_transaction()
 
             note_body = (
                 f"Payment was made for reference {payment.reference}. "
@@ -226,12 +219,14 @@ class NeatWorldpayVTController(http.Controller):
 
         if result_state in ('pending', 'cancel', 'error'):
             link_rec.sudo().write({'status': result_state})
+            if link_rec.sale_order_ids and result_state in ('cancel', 'error'):
+                link_rec._cancel_sale_orders_payment_transaction()
 
         if link_rec.sale_order_ids:
             orders = link_rec.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
             order_names = ', '.join(link_rec.sale_order_ids.mapped('name'))
             if result_state == 'done' and orders:
-                self._confirm_sale_orders(orders)
+                link_rec._complete_sale_orders_payment_transaction()
                 note_body = (
                     f"Payment was made for reference {reference}. "
                     f"Multiple sales orders were paid together. "
@@ -246,23 +241,14 @@ class NeatWorldpayVTController(http.Controller):
                     )
                 link_rec.sudo().write({'status': 'paid'})
             elif result_state == 'done':
+                link_rec._complete_sale_orders_payment_transaction()
                 link_rec.sudo().write({'status': 'paid'})
             return True
 
         invoices = link_rec.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
         invoice_names = ', '.join(link_rec.invoice_ids.mapped('name'))
         if result_state == 'done' and invoices:
-            wizard_ctx = {
-                'active_model': 'account.move',
-                'active_ids': invoices.ids,
-                'active_id': invoices.ids[0],
-            }
-            register_wizard_vals = {}
-            if link_rec.provider_id.journal_id:
-                register_wizard_vals['journal_id'] = link_rec.provider_id.journal_id.id
-            register_wizard_vals['group_payment'] = True
-            register_wizard = request.env['account.payment.register'].sudo().with_context(**wizard_ctx).create(register_wizard_vals)
-            register_wizard._create_payments()
+            link_rec._complete_sale_orders_payment_transaction()
 
             note_body = (
                 f"Payment was made for reference {reference}. "
