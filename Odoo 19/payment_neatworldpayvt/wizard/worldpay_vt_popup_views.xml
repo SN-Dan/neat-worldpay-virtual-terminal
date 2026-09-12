@@ -5,7 +5,9 @@
         <field name="model">worldpay.vt.popup</field>
         <field name="arch" type="xml">
             <form string="Pay by WorldPay Virtual Terminal" style="max-width: 1200px;">
-                <field name="payment_page_html" readonly="1" nolabel="1" widget="html"/>
+                <group>
+                    <field name="payment_page_html" readonly="1" nolabel="1" widget="html"/>
+                </group>
                 <footer>
                     <button string="Close" special="cancel" class="btn-secondary"/>
                 </footer>

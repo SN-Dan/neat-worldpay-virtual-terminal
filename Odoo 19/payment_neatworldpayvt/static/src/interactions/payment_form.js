@@ -2,6 +2,7 @@
 
 import { _t } from '@web/core/l10n/translation';
 import { patch } from '@web/core/utils/patch';
+
 import { PaymentForm } from '@payment/interactions/payment_form';
 
 patch(PaymentForm.prototype, {
@@ -122,6 +123,7 @@ patch(PaymentForm.prototype, {
         const worldpayUrl = processingValues.worldpay_url || 'https://try.access.worldpay.com';
         const billingAddress = processingValues.billing_address || {};
         const countries = processingValues.countries || [];
+        const savedPaymentTokens = processingValues.saved_payment_tokens || [];
 
         if (!checkoutId) {
             container.innerHTML = `
@@ -234,6 +236,43 @@ patch(PaymentForm.prototype, {
                 .form-group select.error {
                     border-color: #dc3545;
                 }
+                .saved-card-wrap {
+                    border: 1px solid #dee2e6;
+                    border-radius: 5px;
+                    padding: 12px;
+                    margin-bottom: 18px;
+                    background: #f8f9fa;
+                }
+                .saved-card-wrap label {
+                    display: block;
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #495057;
+                    margin-bottom: 6px;
+                }
+                .payment-method-option {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-size: 14px;
+                    color: #495057;
+                    margin: 8px 0;
+                    cursor: pointer;
+                }
+                .payment-method-option input {
+                    margin: 0;
+                }
+                .save-card-wrap {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-size: 13px;
+                    color: #495057;
+                    margin: 4px 0 16px;
+                }
+                .new-card-fields.hidden {
+                    display: none;
+                }
                 .submit {
                     background: #007bff;
                     cursor: pointer;
@@ -341,21 +380,21 @@ patch(PaymentForm.prototype, {
                 .success-message.show {
                     display: block;
                 }
-            .success-message[style*="color: #dc3545"] {
+                .success-message[style*="color: #dc3545"] {
                     background-color: #f8d7da;
                     border-color: #f5c6cb;
                     color: #dc3545;
                 }
-            .disclaimer {
-                font-size: 14px;
-                background-color: #fff3cd;
-                border: 1px solid #ffeeba;
-                color: #856404;
-                border-radius: 5px;
-                padding: 12px 15px;
-                margin-bottom: 20px;
-                line-height: 1.4;
-            }
+                .disclaimer {
+                    font-size: 14px;
+                    background-color: #fff3cd;
+                    border: 1px solid #ffeeba;
+                    color: #856404;
+                    border-radius: 5px;
+                    padding: 12px 15px;
+                    margin-bottom: 20px;
+                    line-height: 1.4;
+                }
                 .checkout.hide-fields .label,
                 .checkout.hide-fields .field,
                 .checkout.hide-fields .form-group,
@@ -371,73 +410,87 @@ patch(PaymentForm.prototype, {
                 }
             </style>
             <div style="padding: 20px; max-width: 500px; margin: 0 auto;">
-            <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #e9ecef;">
-                <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 600; color: #33475b;">Virtual Terminal Payment</h1>
-            </div>
-            <p class="disclaimer">${disclaimerText}</p>
+                <div style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #e9ecef;">
+                    <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 600; color: #33475b;">Virtual Terminal Payment</h1>
+                </div>
+                <p class="disclaimer">${disclaimerText}</p>
                 
                 <form class="checkout" id="card-form">
-                    <div class="label">Card number <span class="type"></span></div>
-                    <section id="card-pan" class="field"></section>
-                    <section class="col-2">
-                        <section class="col">
-                            <div class="label">Expiry date</div>
-                            <section id="card-expiry" class="field"></section>
+                    <div class="saved-card-wrap" id="savedCardWrap">
+                        <div style="font-size: 13px; font-weight: 500; color: #495057; margin-bottom: 6px;">Payment method</div>
+                        <label class="payment-method-option">
+                            <input type="radio" name="selectedPaymentTokenId" value="" checked>
+                            <span>Use a new card</span>
+                        </label>
+                        <div id="savedPaymentTokenOptions"></div>
+                    </div>
+                    <div class="new-card-fields" id="newCardFields">
+                        <div class="label">Card number <span class="type"></span></div>
+                        <section id="card-pan" class="field"></section>
+                        <section class="col-2">
+                            <section class="col">
+                                <div class="label">Expiry date</div>
+                                <section id="card-expiry" class="field"></section>
+                            </section>
+                            <section class="col">
+                                <div class="label">CVV</div>
+                                <section id="card-cvv" class="field"></section>
+                            </section>
                         </section>
-                        <section class="col">
-                            <div class="label">CVV</div>
-                            <section id="card-cvv" class="field"></section>
-                        </section>
-                    </section>
-                    
-                    <div class="form-group">
-                        <label for="cardholderName">Cardholder Name</label>
-                        <input type="text" id="cardholderName" name="cardholderName" required>
-                        <div class="error-message" id="cardholderName-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="address">Address</label>
-                        <input type="text" id="address" name="address" value="${billingAddress.addressLine || ''}" required>
-                        <div class="error-message" id="address-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="address2">Address 2</label>
-                        <input type="text" id="address2" name="address2" value="${billingAddress.addressLine2 || ''}">
-                        <div class="error-message" id="address2-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="address3">Address 3</label>
-                        <input type="text" id="address3" name="address3" value="${billingAddress.address3 || ''}">
-                        <div class="error-message" id="address3-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="city">City</label>
-                        <input type="text" id="city" name="city" value="${billingAddress.city || ''}" required>
-                        <div class="error-message" id="city-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="state">State</label>
-                        <input type="text" id="state" name="state" value="${billingAddress.state || ''}">
-                        <div class="error-message" id="state-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="country">Country</label>
-                        <select id="country" name="country" required>
-                            <option value="">Select a country...</option>
-                        </select>
-                        <div class="error-message" id="country-error"></div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="postcode">Postcode</label>
-                        <input type="text" id="postcode" name="postcode" value="${billingAddress.postalCode || ''}" required>
-                        <div class="error-message" id="postcode-error"></div>
+                        
+                        <div class="form-group">
+                            <label for="cardholderName">Cardholder Name</label>
+                            <input type="text" id="cardholderName" name="cardholderName" required>
+                            <div class="error-message" id="cardholderName-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="address">Address</label>
+                            <input type="text" id="address" name="address" value="${billingAddress.addressLine || ''}" required>
+                            <div class="error-message" id="address-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="address2">Address 2</label>
+                            <input type="text" id="address2" name="address2" value="${billingAddress.addressLine2 || ''}">
+                            <div class="error-message" id="address2-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="address3">Address 3</label>
+                            <input type="text" id="address3" name="address3" value="${billingAddress.address3 || ''}">
+                            <div class="error-message" id="address3-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="city">City</label>
+                            <input type="text" id="city" name="city" value="${billingAddress.city || ''}" required>
+                            <div class="error-message" id="city-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="state">State</label>
+                            <input type="text" id="state" name="state" value="${billingAddress.state || ''}">
+                            <div class="error-message" id="state-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="country">Country</label>
+                            <select id="country" name="country" required>
+                                <option value="">Select a country...</option>
+                            </select>
+                            <div class="error-message" id="country-error"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="postcode">Postcode</label>
+                            <input type="text" id="postcode" name="postcode" value="${billingAddress.postalCode || ''}" required>
+                            <div class="error-message" id="postcode-error"></div>
+                        </div>
+                        <label class="save-card-wrap">
+                            <input type="checkbox" id="saveCardDetails" name="saveCardDetails"/>
+                            Save this card for future virtual terminal payments
+                        </label>
                     </div>
                     
                     <div class="button-group">
@@ -459,11 +512,49 @@ patch(PaymentForm.prototype, {
             worldpayUrl: worldpayUrl,
             countries: countries,
             countryCode: billingAddress.country || '',
-            billingAddress: billingAddress
+            billingAddress: billingAddress,
+            savedPaymentTokens: savedPaymentTokens
         };
 
         // Load Worldpay checkout.js and initialize
-        this._loadWorldpayCheckout(checkoutId, worldpayUrl, countries, billingAddress.country || '');
+        this._loadWorldpayCheckout(checkoutId, worldpayUrl, countries, billingAddress.country || '', savedPaymentTokens);
+    },
+
+    /**
+     * Toggle HTML5 required on billing fields (hidden fields must not stay required).
+     *
+     * @private
+     * @param {boolean} required
+     * @return {undefined}
+     */
+    _setBillingFieldsRequired: function (required) {
+        ['cardholderName', 'address', 'city', 'country', 'postcode'].forEach(function (fieldId) {
+            const field = document.getElementById(fieldId);
+            if (!field) {
+                return;
+            }
+            if (required) {
+                field.setAttribute('required', 'required');
+            } else {
+                field.removeAttribute('required');
+            }
+        });
+    },
+
+    /**
+     * Show or hide new-card fields based on saved-card selection.
+     *
+     * @private
+     * @return {undefined}
+     */
+    _toggleNewCardFields: function () {
+        const selectedTokenInput = document.querySelector('input[name="selectedPaymentTokenId"]:checked');
+        const useSavedCard = Boolean(selectedTokenInput && selectedTokenInput.value);
+        const newCardFields = document.getElementById('newCardFields');
+        if (newCardFields) {
+            newCardFields.classList.toggle('hidden', useSavedCard);
+        }
+        this._setBillingFieldsRequired(!useSavedCard);
     },
 
     /**
@@ -474,9 +565,10 @@ patch(PaymentForm.prototype, {
      * @param {string} worldpayUrl - The Worldpay base URL
      * @param {Array} countries - Array of country objects
      * @param {string} countryCode - Default country code
+     * @param {Array} savedPaymentTokens - Saved VT token options
      * @return {undefined}
      */
-    _loadWorldpayCheckout: function (checkoutId, worldpayUrl, countries, countryCode) {
+    _loadWorldpayCheckout: function (checkoutId, worldpayUrl, countries, countryCode, savedPaymentTokens) {
         const self = this;
         
         // Populate country dropdown
@@ -492,7 +584,30 @@ patch(PaymentForm.prototype, {
                 countrySelect.appendChild(option);
             });
         }
-        
+        const savedTokenOptions = document.getElementById('savedPaymentTokenOptions');
+        const newCardFields = document.getElementById('newCardFields');
+        if (savedTokenOptions && savedPaymentTokens && savedPaymentTokens.length) {
+            savedPaymentTokens.forEach(function(token) {
+                const label = document.createElement('label');
+                label.className = 'payment-method-option';
+                const input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'selectedPaymentTokenId';
+                input.value = token.payment_token_id || '';
+                const text = document.createElement('span');
+                text.textContent = token.label || 'Saved card';
+                label.appendChild(input);
+                label.appendChild(text);
+                savedTokenOptions.appendChild(label);
+            });
+        }
+        document.querySelectorAll('input[name="selectedPaymentTokenId"]').forEach(function (input) {
+            input.addEventListener('change', function () {
+                self._toggleNewCardFields();
+            });
+        });
+        this._toggleNewCardFields();
+
         // Load Worldpay checkout.js script if not already loaded
         if (!window.Worldpay || !window.Worldpay.checkout) {
             const script = document.createElement('script');
@@ -668,21 +783,28 @@ patch(PaymentForm.prototype, {
         // Form submission
         form.addEventListener('submit', function(event) {
             event.preventDefault();
+            self._toggleNewCardFields();
 
-            // Validate all fields
+            const selectedTokenInput = document.querySelector('input[name="selectedPaymentTokenId"]:checked');
+            const selectedTokenId = selectedTokenInput ? selectedTokenInput.value : '';
+
             let hasErrors = false;
-            Object.keys(validators).forEach(function(fieldId) {
-                const field = document.getElementById(fieldId);
-                if (field) {
-                    const error = validators[fieldId](field.value);
-                    if (error) {
-                        showFieldError(fieldId, error);
-                        hasErrors = true;
+            if (!selectedTokenId) {
+                Object.keys(validators).forEach(function(fieldId) {
+                    const field = document.getElementById(fieldId);
+                    if (field) {
+                        const error = validators[fieldId](field.value);
+                        if (error) {
+                            showFieldError(fieldId, error);
+                            hasErrors = true;
+                        }
                     }
-                }
-            });
+                });
+            }
 
-            if (hasErrors) return;
+            if (hasErrors) {
+                return;
+            }
 
             // Disable submit, clear, and cancel buttons
             const submitButton = form.querySelector('.submit');
@@ -693,19 +815,7 @@ patch(PaymentForm.prototype, {
             if (clearButton) clearButton.disabled = true;
             if (cancelButton) cancelButton.disabled = true;
 
-            // Generate session state
-            checkout.generateSessionState(function(error, sessionState) {
-                if (error) {
-                    console.error(error);
-                    document.getElementById('form-error').textContent = 'Failed to process payment. Please try again.';
-                    document.getElementById('form-error').classList.add('show');
-                    submitButton.disabled = false;
-                    submitButton.textContent = 'Charge Customer';
-                    if (clearButton) clearButton.disabled = false;
-                    if (cancelButton) cancelButton.disabled = false;
-                    return;
-                }
-
+            function submitPayment(sessionState) {
                 // Submit payment data to backend via form POST
                 const submitForm = document.createElement('form');
                 submitForm.method = 'POST';
@@ -714,7 +824,7 @@ patch(PaymentForm.prototype, {
                 const fields = {
                     transaction_reference: data.transactionReference,
                     transaction_key: data.transactionKey,
-                    sessionState: sessionState,
+                    sessionState: sessionState || '',
                     cardholderName: document.getElementById('cardholderName').value.trim(),
                     address: document.getElementById('address').value.trim(),
                     address2: document.getElementById('address2').value.trim(),
@@ -722,7 +832,9 @@ patch(PaymentForm.prototype, {
                     city: document.getElementById('city').value.trim(),
                     state: document.getElementById('state').value.trim(),
                     country: document.getElementById('country').value,
-                    postcode: document.getElementById('postcode').value.trim()
+                    postcode: document.getElementById('postcode').value.trim(),
+                    selected_payment_token_id: selectedTokenId,
+                    save_card_details: document.getElementById('saveCardDetails').checked ? '1' : ''
                 };
                 
                 Object.keys(fields).forEach(function(key) {
@@ -738,6 +850,26 @@ patch(PaymentForm.prototype, {
                 if (clearButton) clearButton.disabled = true;
                 if (cancelButton) cancelButton.disabled = true;
                 submitForm.submit();
+            }
+
+            if (selectedTokenId) {
+                submitPayment('');
+                return;
+            }
+
+            // Generate session state
+            checkout.generateSessionState(function(error, sessionState) {
+                if (error) {
+                    console.error(error);
+                    document.getElementById('form-error').textContent = 'Failed to process payment. Please try again.';
+                    document.getElementById('form-error').classList.add('show');
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Charge Customer';
+                    if (clearButton) clearButton.disabled = false;
+                    if (cancelButton) cancelButton.disabled = false;
+                    return;
+                }
+                submitPayment(sessionState);
             });
         });
 
@@ -755,6 +887,19 @@ patch(PaymentForm.prototype, {
                     document.getElementById('state').value = billingAddress.state || '';
                     document.getElementById('country').value = data.countryCode || '';
                     document.getElementById('postcode').value = billingAddress.postalCode || '';
+                    const newCardRadio = document.querySelector('input[name="selectedPaymentTokenId"][value=""]');
+                    const newCardFields = document.getElementById('newCardFields');
+                    if (newCardRadio) {
+                        newCardRadio.checked = true;
+                    }
+                    if (newCardFields) {
+                        newCardFields.classList.remove('hidden');
+                    }
+                    self._toggleNewCardFields();
+                    const saveCardDetails = document.getElementById('saveCardDetails');
+                    if (saveCardDetails) {
+                        saveCardDetails.checked = false;
+                    }
                     
                     document.querySelectorAll('.error-message').forEach(function(el) {
                         el.classList.remove('show');

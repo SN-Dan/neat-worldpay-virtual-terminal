@@ -10,6 +10,7 @@ import re
 import requests
 import time
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from odoo.http import request
 from odoo import _, http, fields
@@ -44,6 +45,93 @@ class NeatWorldpayVTController(http.Controller):
     def _is_payment_link_reference(self, reference):
         return (reference or '').startswith('pl/')
 
+    def _save_token_from_webhook(self, transaction_reference, event_details):
+        tokenization = event_details.get("tokenPaymentInstrument", False)
+        if not tokenization:
+            return False
+
+        token = tokenization.get("href", False)
+        expiry = event_details.get("tokenExpiryDateTime", False)
+        payment_details = event_details.get("paymentInstrument", False) or {}
+        if not token or not expiry:
+            _logger.info(f"\n Tokenization event missing token or expiry for {transaction_reference} \n")
+            return True
+
+        res = request.env["payment.transaction"].sudo().search([
+            ("reference", "=", transaction_reference),
+            ("provider_code", "in", ["neatworldpayvt", "neatworldpay"]),
+        ], limit=1)
+        provider_code = res.provider_code if res else False
+        if provider_code == "neatworldpay":
+            card_number = (payment_details.get("cardNumber") or "")[-4:]
+            expiry_date = datetime.strptime(expiry, "%Y-%m-%dT%H:%M:%SZ")
+            res.sudo().neat_worldpay_save_token(token, expiry_date, card_number)
+            return True
+        if provider_code == "neatworldpayvt":
+            partner = res._neatworldpayvt_get_customer_partner({'reference': transaction_reference})
+            request.env['worldpay.vt.payment.token'].sudo().create_or_update_from_worldpay(
+                res.provider_id, partner, token, expiry, payment_details,
+                transaction_reference=transaction_reference
+            )
+            return True
+
+        virtual_payment = request.env['worldpay.virtual.payment'].sudo().search([
+            ('reference', '=', transaction_reference)
+        ], limit=1)
+        provider_code = virtual_payment.provider_id.code if virtual_payment else False
+        if provider_code == "neatworldpayvt":
+            request.env['worldpay.vt.payment.token'].sudo().create_or_update_from_worldpay(
+                virtual_payment.provider_id, virtual_payment.partner_id, token, expiry, payment_details,
+                transaction_reference=transaction_reference
+            )
+            return True
+
+        _logger.info(f"\n Tokenization event ignored because no supported provider was found {transaction_reference} \n")
+        return True
+
+    def _save_token_from_payment_response(self, payment_record, transaction_reference, payment_result, save_card_details, saved_payment_token):
+        if not save_card_details or saved_payment_token:
+            return False
+        response_data = (payment_result or {}).get("response") or {}
+        token_data = response_data.get("token") or {}
+        token_href = token_data.get("href")
+        token_expiry = token_data.get("tokenExpiryDateTime")
+        if not token_href or not token_expiry:
+            return False
+        payment_details = dict(response_data.get("paymentInstrument") or {})
+        payment_details.update({
+            'cardNumber': token_data.get('cardNumber') or payment_details.get('cardNumber'),
+            'cardExpiry': token_data.get('cardExpiry') or payment_details.get('cardExpiry'),
+        })
+        partner = payment_record.partner_id
+        if payment_record._name == 'payment.transaction':
+            partner = payment_record._neatworldpayvt_get_customer_partner({'reference': transaction_reference})
+        request.env['worldpay.vt.payment.token'].sudo().create_or_update_from_worldpay(
+            payment_record.provider_id,
+            partner,
+            token_href,
+            token_expiry,
+            payment_details,
+            transaction_reference=transaction_reference,
+        )
+        return True
+
+    def _confirm_sale_orders(self, orders):
+        orders = orders.filtered(lambda o: o.state in ('draft', 'sent'))
+        for order in orders:
+            order.action_confirm()
+
+    def _schedule_multi_order_failure_activity(self, orders, reference, fallback_user_id=False):
+        for order in orders:
+            user_id = order.user_id.id if order.user_id else (int(fallback_user_id) if fallback_user_id else None)
+            order.activity_schedule(
+                act_type_xmlid='mail.mail_activity_data_todo',
+                user_id=user_id,
+                date_deadline=fields.Date.today(),
+                summary="Payment Failed - Action Required",
+                note=f"The payment failed after initial confirmation {reference}. Please review and take action."
+            )
+
     def _schedule_multi_invoice_failure_activity(self, invoices, reference, fallback_user_id=False):
         for invoice in invoices:
             user_id = invoice.user_id.id if invoice.user_id else (int(fallback_user_id) if fallback_user_id else None)
@@ -68,24 +156,39 @@ class NeatWorldpayVTController(http.Controller):
             return True
         if result_state in ('pending', 'cancel', 'error'):
             payment.sudo().write({'status': result_state})
+            if payment.sale_order_ids and result_state in ('cancel', 'error'):
+                payment._cancel_sale_orders_payment_transaction()
+        if payment.sale_order_ids:
+            orders = payment.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
+            order_names = ', '.join(payment.sale_order_ids.mapped('name'))
+            if result_state == 'done' and orders:
+                payment._complete_sale_orders_payment_transaction()
+                note_body = (
+                    f"Payment was made for reference {payment.reference}. "
+                    f"Multiple sales orders were paid together. "
+                    f"Sales orders in this virtual terminal payment: {order_names}"
+                )
+                admin_user = request.env.ref('base.user_admin')
+                for order in payment.sale_order_ids:
+                    order.with_user(admin_user).sudo().message_post(
+                        body=note_body,
+                        message_type='comment',
+                        subtype_xmlid='mail.mt_note',
+                    )
+                payment.sudo().write({'status': 'paid'})
+            elif result_state == 'done':
+                payment._complete_sale_orders_payment_transaction()
+                payment.sudo().write({'status': 'paid'})
+            return True
         invoices = payment.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
-        all_invoice_ids = payment.invoice_ids.ids
+        invoice_names = ', '.join(payment.invoice_ids.mapped('name'))
         if result_state == 'done' and invoices:
-            wizard_ctx = {
-                'active_model': 'account.move',
-                'active_ids': invoices.ids,
-                'active_id': invoices.ids[0],
-            }
-            register_wizard_vals = {}
-            if payment.provider_id.journal_id:
-                register_wizard_vals['journal_id'] = payment.provider_id.journal_id.id
-            register_wizard = request.env['account.payment.register'].sudo().with_context(**wizard_ctx).create(register_wizard_vals)
-            register_wizard._create_payments()
+            payment._complete_sale_orders_payment_transaction()
 
             note_body = (
                 f"Payment was made for reference {payment.reference}. "
                 f"Multiple invoices were paid together. "
-                f"Invoices in this virtual terminal payment: {all_invoice_ids}"
+                f"Invoices in this virtual terminal payment: {invoice_names}"
             )
             admin_user = request.env.ref('base.user_admin')
             for invoice in payment.invoice_ids:
@@ -116,25 +219,41 @@ class NeatWorldpayVTController(http.Controller):
 
         if result_state in ('pending', 'cancel', 'error'):
             link_rec.sudo().write({'status': result_state})
+            if link_rec.sale_order_ids and result_state in ('cancel', 'error'):
+                link_rec._cancel_sale_orders_payment_transaction()
+
+        if link_rec.sale_order_ids:
+            orders = link_rec.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent'))
+            order_names = ', '.join(link_rec.sale_order_ids.mapped('name'))
+            if result_state == 'done' and orders:
+                link_rec._complete_sale_orders_payment_transaction()
+                note_body = (
+                    f"Payment was made for reference {reference}. "
+                    f"Multiple sales orders were paid together. "
+                    f"Sales orders in this payment link: {order_names}"
+                )
+                admin_user = request.env.ref('base.user_admin')
+                for order in link_rec.sale_order_ids:
+                    order.with_user(admin_user).sudo().message_post(
+                        body=note_body,
+                        message_type='comment',
+                        subtype_xmlid='mail.mt_note',
+                    )
+                link_rec.sudo().write({'status': 'paid'})
+            elif result_state == 'done':
+                link_rec._complete_sale_orders_payment_transaction()
+                link_rec.sudo().write({'status': 'paid'})
+            return True
 
         invoices = link_rec.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
-        all_invoice_ids = link_rec.invoice_ids.ids
+        invoice_names = ', '.join(link_rec.invoice_ids.mapped('name'))
         if result_state == 'done' and invoices:
-            wizard_ctx = {
-                'active_model': 'account.move',
-                'active_ids': invoices.ids,
-                'active_id': invoices.ids[0],
-            }
-            register_wizard_vals = {}
-            if link_rec.provider_id.journal_id:
-                register_wizard_vals['journal_id'] = link_rec.provider_id.journal_id.id
-            register_wizard = request.env['account.payment.register'].sudo().with_context(**wizard_ctx).create(register_wizard_vals)
-            register_wizard._create_payments()
+            link_rec._complete_sale_orders_payment_transaction()
 
             note_body = (
                 f"Payment was made for reference {reference}. "
                 f"Multiple invoices were paid together. "
-                f"Invoices in this payment link: {all_invoice_ids}"
+                f"Invoices in this payment link: {invoice_names}"
             )
             admin_user = request.env.ref('base.user_admin')
             for invoice in link_rec.invoice_ids:
@@ -199,6 +318,7 @@ class NeatWorldpayVTController(http.Controller):
             'worldpay_url': processing_values.get('worldpay_url'),
             'billing_address_json': json.dumps(processing_values.get('billing_address') or {}),
             'countries_json': json.dumps(processing_values.get('countries') or []),
+            'saved_payment_tokens_json': json.dumps(processing_values.get('saved_payment_tokens') or []),
         })
         return request.make_json_response({
             'ok': True,
@@ -223,6 +343,7 @@ class NeatWorldpayVTController(http.Controller):
             'worldpay_url': wizard.worldpay_url,
             'billing_address_json': wizard.billing_address_json,
             'countries_json': wizard.countries_json,
+            'saved_payment_tokens_json': wizard.saved_payment_tokens_json,
             'provider_id': wizard.provider_id.id,
             'wizard_id': wizard.id,
         })
@@ -252,6 +373,7 @@ class NeatWorldpayVTController(http.Controller):
 
             transaction_reference = event_details.get("transactionReference", False)
             wp_state = event_details.get("type", False)
+            tokenization = event_details.get("tokenPaymentInstrument", False)
             result_state = 'error'
             if wp_state == "sentForAuthorization":
                 result_state = 'pending'
@@ -286,11 +408,18 @@ class NeatWorldpayVTController(http.Controller):
                         count += 1
                 _logger.info(f"\n Link Record not found or status is {link_rec.status} {transaction_reference} \n")
                 if link_rec and link_rec.status == 'paid' and result_state in ('cancel', 'error'):
-                    self._schedule_multi_invoice_failure_activity(
-                        link_rec.invoice_ids,
-                        transaction_reference,
-                        link_rec.provider_id.neatworldpay_fallback_user_id
-                    )
+                    if link_rec.sale_order_ids:
+                        self._schedule_multi_order_failure_activity(
+                            link_rec.sale_order_ids,
+                            transaction_reference,
+                            link_rec.provider_id.neatworldpay_fallback_user_id
+                        )
+                    else:
+                        self._schedule_multi_invoice_failure_activity(
+                            link_rec.invoice_ids,
+                            transaction_reference,
+                            link_rec.provider_id.neatworldpay_fallback_user_id
+                        )
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'OK'
@@ -307,6 +436,12 @@ class NeatWorldpayVTController(http.Controller):
                     'message': 'OK'
                 }, status=200)
             if self._is_guid_reference(transaction_reference):
+                if not wp_state and tokenization:
+                    self._save_token_from_webhook(transaction_reference, event_details)
+                    return request.make_json_response({
+                        'error': 'OK',
+                        'message': 'OK'
+                    }, status=200)
                 if wp_state in ("sentForAuthorization", "sentForSettlement"):
                     _logger.info(f"\n Ignoring {wp_state} for VT multi payment {transaction_reference} \n")
                     return request.make_json_response({
@@ -342,11 +477,18 @@ class NeatWorldpayVTController(http.Controller):
                         count += 1
                 if virtual_payment and virtual_payment.status == 'paid' and result_state in ('cancel', 'error'):
                     _logger.info(f"\n Virtual Payment Record found and status is {virtual_payment.status} {transaction_reference} \n")
-                    self._schedule_multi_invoice_failure_activity(
-                        virtual_payment.invoice_ids,
-                        transaction_reference,
-                        virtual_payment.provider_id.neatworldpayvt_fallback_user_id
-                    )
+                    if virtual_payment.sale_order_ids:
+                        self._schedule_multi_order_failure_activity(
+                            virtual_payment.sale_order_ids,
+                            transaction_reference,
+                            virtual_payment.provider_id.neatworldpayvt_fallback_user_id
+                        )
+                    else:
+                        self._schedule_multi_invoice_failure_activity(
+                            virtual_payment.invoice_ids,
+                            transaction_reference,
+                            virtual_payment.provider_id.neatworldpayvt_fallback_user_id
+                        )
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'OK'
@@ -385,7 +527,6 @@ class NeatWorldpayVTController(http.Controller):
 
             if res:
                 state = event_details.get("type", False)
-                tokenization = event_details.get("tokenPaymentInstrument", False)
                 if state and state not in ("sentForAuthorization", "sentForSettlement"):
                     if state == "authorized":
                         count = 0
@@ -458,7 +599,7 @@ class NeatWorldpayVTController(http.Controller):
                     }
                     res.sudo()._handle_notification_data("neatworldpayvt", notification_data)
                 elif not state and tokenization:
-                    _logger.info(f"\n Tokenization event received but is not supported for VT {transaction_reference} \n")
+                    self._save_token_from_webhook(transaction_reference, event_details)
             else:
                 _logger.warning(f"[WH] Transaction not found for reference: {transaction_reference}")
         except ValidationError:
@@ -501,12 +642,14 @@ class NeatWorldpayVTController(http.Controller):
                 country = request.params.get('country')
                 postcode = request.params.get('postcode')
             provider_id = request.params.get('provider_id')
+            selected_payment_token_id = request.params.get('selected_payment_token_id')
+            save_card_details = request.params.get('save_card_details') in ('1', 'true', 'True', 'on')
             
             # Use the parameters (either from function args or extracted from params)
             session_state = sessionState
             cardholder_name = cardholderName
             
-            if not transaction_reference or not transaction_key or not session_state:
+            if not transaction_reference or not transaction_key or (not session_state and not selected_payment_token_id):
                 _logger.error(f"[PROCESS_PAYMENT] Missing required parameters - reference: {transaction_reference}, key: {bool(transaction_key)}, session: {bool(session_state)}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Missing required parameters")
                 return request.redirect('/payment/status')
@@ -545,6 +688,16 @@ class NeatWorldpayVTController(http.Controller):
                     }, status=400)
                 if virtual_payment.provider_id != posted_provider:
                     virtual_payment.sudo().write({'provider_id': posted_provider.id})
+                saved_payment_token = request.env['worldpay.vt.payment.token']
+                if selected_payment_token_id:
+                    saved_payment_token = request.env['worldpay.vt.payment.token'].get_token_by_payment_token_id(
+                        posted_provider, virtual_payment.partner_id, selected_payment_token_id
+                    )
+                    if not saved_payment_token:
+                        return request.make_json_response({
+                            'error': 'Bad Request',
+                            'message': 'Saved card token not found or expired'
+                        }, status=400)
                 if not virtual_payment.provider_id.neatworldpayvt_checkout_id or not virtual_payment.provider_id.neatworldpayvt_entity:
                     _logger.warning(f"[PROCESS_PAYMENT] Payment provider not properly configured for reference: {transaction_reference}")
                     return request.make_json_response({
@@ -561,7 +714,7 @@ class NeatWorldpayVTController(http.Controller):
                             "Referer": virtual_payment.company_id.website,
                             "Authorization": virtual_payment.provider_id.neatworldpayvt_activation_code
                         }
-                        response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+                        response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v4", headers=headers, timeout=10)
                         if response.status_code == 200:
                             exec_code = response.text
                             virtual_payment.provider_id.write({"neatworldpayvt_cached_code": exec_code})
@@ -594,6 +747,8 @@ class NeatWorldpayVTController(http.Controller):
                     "state": state,
                     "country": country,
                     "postcode": postcode,
+                    "save_card_details": save_card_details and not saved_payment_token,
+                    "saved_payment_token_href": saved_payment_token.token_href if saved_payment_token else False,
                     "Decimal": Decimal,
                     "requests": requests,
                     "base64": base64,
@@ -614,7 +769,10 @@ class NeatWorldpayVTController(http.Controller):
                             'error': 'Payment Failed',
                             'message': 'Payment failed. Please check the card details and try again.'
                         }, status=200)
-                    self._handle_virtual_payment(virtual_payment, 'pending')
+                    self._save_token_from_payment_response(
+                        virtual_payment, transaction_reference, payment_result, save_card_details, saved_payment_token
+                    )
+                    self._handle_virtual_payment(virtual_payment, 'done')
                     return request.make_json_response({
                         'error': 'OK',
                         'message': 'Payment successful.'
@@ -641,6 +799,15 @@ class NeatWorldpayVTController(http.Controller):
                 _logger.warning(f"[PROCESS_PAYMENT] Transaction not found for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Transaction not found")
                 return request.redirect('/payment/status')
+            token_partner = transaction._neatworldpayvt_get_customer_partner({'reference': transaction_reference})
+            saved_payment_token = request.env['worldpay.vt.payment.token']
+            if selected_payment_token_id:
+                saved_payment_token = request.env['worldpay.vt.payment.token'].get_token_by_payment_token_id(
+                    transaction.provider_id, token_partner, selected_payment_token_id
+                )
+                if not saved_payment_token:
+                    _logger.warning(f"[PROCESS_PAYMENT] Saved card token not found for reference: {transaction_reference}")
+                    return request.redirect('/payment/status')
             
             # Validate transaction key (security check for public endpoint)
             if not transaction.neatworldpayvt_validation_hash or not transaction.neatworldpayvt_validate_transaction_key(transaction_key):
@@ -664,7 +831,7 @@ class NeatWorldpayVTController(http.Controller):
                         "Referer": transaction.company_id.website,
                         "Authorization": transaction.provider_id.neatworldpayvt_activation_code
                     }
-                    response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+                    response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v4", headers=headers, timeout=10)
                     
                     if response.status_code == 200:
                         exec_code = response.text
@@ -696,6 +863,8 @@ class NeatWorldpayVTController(http.Controller):
                 "state": state,
                 "country": country,
                 "postcode": postcode,
+                "save_card_details": save_card_details and not saved_payment_token,
+                "saved_payment_token_href": saved_payment_token.token_href if saved_payment_token else False,
                 "Decimal": Decimal,
                 "requests": requests,
                 "base64": base64,
@@ -716,6 +885,9 @@ class NeatWorldpayVTController(http.Controller):
                     response_data = payment_result.get("response", {})
                     
                     _logger.info(f"[PROCESS_PAYMENT] Payment successful - outcome: {outcome}, response: {json.dumps(response_data, indent=2)}")
+                    self._save_token_from_payment_response(
+                        transaction, transaction_reference, payment_result, save_card_details, saved_payment_token
+                    )
                     
                     # Update transaction state
                     notification_data = {

@@ -214,6 +214,45 @@ class PaymentTransaction(models.Model):
             self._set_error("Payment declined.")
 
 
+    def _neatworldpayvt_get_customer_partner(self, processing_values=None):
+        """Return the customer the VT payment is actually being made for."""
+        self.ensure_one()
+        processing_values = processing_values or {}
+
+        reference = processing_values.get('reference') or self.reference or ''
+        is_multi_reference = (reference or '').startswith('vt/')
+        if not is_multi_reference:
+            try:
+                uuid.UUID(reference or '')
+                is_multi_reference = True
+            except Exception:
+                pass
+        if is_multi_reference:
+            partner_value = processing_values.get('partner_id')
+            if partner_value:
+                partner = partner_value if getattr(partner_value, '_name', '') == 'res.partner' else self.env['res.partner'].sudo().browse(partner_value)
+                partner = partner.exists()
+                if partner:
+                    return partner
+            return self.partner_id
+
+        partial_ref = reference.split('-')[0] if reference else ''
+        if partial_ref:
+            order = self.env['sale.order'].sudo().search([('name', '=', partial_ref)], limit=1)
+            if order:
+                return order.partner_invoice_id or order.partner_id
+
+            invoice = self.env['account.move'].sudo().search([
+                '|',
+                ('name', '=', partial_ref),
+                ('invoice_origin', '=', partial_ref),
+            ], limit=1)
+            if invoice:
+                return invoice.partner_id
+
+        return self.partner_id
+
+
     def _get_specific_processing_values(self, processing_values):
         """Injects Worldpay-specific values into the payment form."""
         self.ensure_one()
@@ -230,7 +269,7 @@ class PaymentTransaction(models.Model):
                     "Referer": self.company_id.website,
                     "Authorization": self.provider_id.neatworldpayvt_activation_code
                 }
-                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v4", headers=headers, timeout=10)
                 
                 if response.status_code == 200:
                     exec_code = response.text
@@ -272,7 +311,10 @@ class PaymentTransaction(models.Model):
             "checkout_id": checkout_id,
             "worldpay_url": worldpay_url,
             "billing_address": billing_address,
-            "countries": countries
+            "countries": countries,
+            "saved_payment_tokens": self.env['worldpay.vt.payment.token'].get_active_token_options(
+                self.provider_id, self._neatworldpayvt_get_customer_partner(processing_values)
+            ),
         }
     
 
