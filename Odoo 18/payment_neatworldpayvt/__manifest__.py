@@ -19,13 +19,14 @@
         'views/worldpay_vt_payment_templates.xml',
         'wizard/worldpay_vt_popup_views.xml',
         'views/payment_neatworldpayvt_templates.xml',
-        'data/payment_provider_data.xml',
+
+        'data/payment_provider_data.xml'
     ],
     'post_init_hook': 'post_init_hook',
     'uninstall_hook': 'uninstall_hook',
     'assets': {
         'web.assets_frontend': [
-            'payment_neatworldpayvt/static/src/interactions/payment_form.js',
+            'payment_neatworldpayvt/static/src/js/payment_form.js'
         ],
     },
     'license': 'LGPL-3',
