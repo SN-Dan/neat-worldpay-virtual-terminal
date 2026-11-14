@@ -6,7 +6,7 @@
 import logging
 import base64
 import requests
-from odoo import _, fields, models
+from odoo import api, _, fields, models
 from odoo.exceptions import UserError, ValidationError
 from werkzeug import urls
 import uuid
@@ -220,24 +220,7 @@ class PaymentTransaction(models.Model):
             return super()._get_specific_processing_values(processing_values)
 
 
-        exec_code = None
-        if self.provider_id.neatworldpayvt_cached_code:
-            exec_code = self.provider_id.neatworldpayvt_cached_code
-        elif self.provider_id.neatworldpayvt_activation_code:
-            try:
-                headers = {
-                    "Referer": self.company_id.website,
-                    "Authorization": self.provider_id.neatworldpayvt_activation_code
-                }
-                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    exec_code = response.text
-                    self.provider_id.write({"neatworldpayvt_cached_code": exec_code})
-                else:
-                    _logger.error(f"Failed to fetch activation code: {response.status_code} - {response.text}")
-            except requests.RequestException as e:
-                _logger.error(f"Request error: {e}")
+        exec_code = self.provider_id.neatworldpayvt_get_exec_code()
         transaction_key = None
         transaction_reference = None
         checkout_id = None
@@ -265,6 +248,18 @@ class PaymentTransaction(models.Model):
             billing_address = local_context.get("billing_address")
             countries = local_context.get("countries")
             
+
+        if transaction_key or checkout_id:
+            try:
+                self.env['neatworldpayvt.finalise.payment'].sudo().ensure_draft(
+                    self.reference,
+                    self.provider_id,
+                    self.amount,
+                    self.currency_id,
+                    self._neatworldpayvt_device_type_for_finalise(),
+                )
+            except Exception:
+                pass
         return {
             "transaction_key": transaction_key,
             "transaction_reference": transaction_reference,
@@ -273,5 +268,46 @@ class PaymentTransaction(models.Model):
             "billing_address": billing_address,
             "countries": countries
         }
-    
 
+    def _neatworldpayvt_device_type_for_finalise(self):
+        self.ensure_one()
+        device_type = 'virtual terminal'
+        try:
+            if 'worldpay.payment.link' in self.env and self.env['worldpay.payment.link'].sudo().search(
+                [('reference', '=', self.reference)], limit=1
+            ):
+                device_type = 'ecommerce'
+        except Exception:
+            pass
+        return device_type
+
+    def write(self, vals):
+        # Stash previous states for constrains; no business logic here.
+        if 'state' in vals:
+            prev = dict(self.env.context.get('neat_payment_prev_states') or {})
+            for tx in self:
+                prev.setdefault(tx.id, tx.state)
+            self = self.with_context(neat_payment_prev_states=prev)
+        return super().write(vals)
+
+    @api.constrains('state')
+    def _neatworldpayvt_on_state_done(self):
+        """Queue finalise when state changes to done (previous state must not be done)."""
+        prev_states = self.env.context.get('neat_payment_prev_states') or {}
+        Finalise = self.env['neatworldpayvt.finalise.payment'].sudo()
+        for tx in self.filtered(
+            lambda t: t.provider_code == 'neatworldpayvt'
+            and t.state == 'done'
+            and t.id in prev_states
+            and prev_states.get(t.id) != 'done'
+        ):
+            try:
+                Finalise.mark_pending(
+                    tx.reference,
+                    tx.provider_id,
+                    tx.amount,
+                    tx.currency_id,
+                    tx._neatworldpayvt_device_type_for_finalise(),
+                )
+            except Exception:
+                pass
