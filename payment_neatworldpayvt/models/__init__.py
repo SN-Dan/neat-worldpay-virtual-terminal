@@ -11,3 +11,4 @@ from . import account_move
 from . import sale_order
 from . import worldpay_virtual_payment
 from . import worldpay_vt_payment_token
+from . import neatworldpayvt_finalise_payment
