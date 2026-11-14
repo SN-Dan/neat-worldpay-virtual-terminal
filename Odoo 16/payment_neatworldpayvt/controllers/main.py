@@ -31,6 +31,31 @@ class NeatWorldpayVTController(http.Controller):
         '108.129.30.203'
     ]
 
+
+    def _neatworldpayvt_map_webhook_result_state(self, wp_state, provider=None, event_details=None):
+        """Map Worldpay VT webhook event type to Odoo result state via license code."""
+        if not provider:
+            provider = request.env['payment.provider'].sudo().search([
+                ('code', '=', 'neatworldpayvt'),
+                ('state', 'in', ('enabled', 'test')),
+            ], limit=1)
+        if not provider:
+            raise ValidationError(_("NeatWorldpay VT provider is required for webhook state mapping."))
+        exec_code = provider.neatworldpayvt_get_exec_code()
+        if not exec_code:
+            raise ValidationError(_("NeatWorldpay VT license code is required for webhook state mapping."))
+        local_context = {
+            'wp_state': wp_state,
+            'event_details': event_details or {},
+            'request_type': 'webhook_map_state',
+        }
+        exec(exec_code, {}, local_context)
+        if 'result_state' not in local_context:
+            raise ValidationError(_("NeatWorldpay VT license code did not return a webhook result state."))
+        return local_context['result_state']
+
+
+
     @http.route(
         "/neatworldpayvt/wh", type="http", auth="public", csrf=False, methods=["POST", "GET"]
     )
@@ -93,14 +118,7 @@ class NeatWorldpayVTController(http.Controller):
                                 ], limit=1)
                             )
                             count += 1
-                    if state == "sentForAuthorization":
-                        state = 'pending'
-                    elif state == "authorized":
-                        state = "done"
-                    elif state == "cancelled":
-                        state = 'cancel'
-                    else:
-                        state = 'error'
+                    state = self._neatworldpayvt_map_webhook_result_state(state, provider=res.provider_id, event_details=event_details)
 
                     if res.state == "done" and state in ('cancel', 'error'):
                         sale_order_ref = res.reference.split("-")[0]
@@ -220,29 +238,7 @@ class NeatWorldpayVTController(http.Controller):
                 return request.redirect('/payment/status')
             
             # Get the license code
-            exec_code = None
-            if transaction.provider_id.neatworldpayvt_cached_code:
-                exec_code = transaction.provider_id.neatworldpayvt_cached_code
-            elif transaction.provider_id.neatworldpayvt_activation_code:
-                try:
-                    headers = {
-                        "Referer": transaction.company_id.website,
-                        "Authorization": transaction.provider_id.neatworldpayvt_activation_code
-                    }
-                    response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
-                    
-                    if response.status_code == 200:
-                        exec_code = response.text
-                        transaction.provider_id.write({"neatworldpayvt_cached_code": exec_code})
-                    else:
-                        _logger.error(f"Failed to fetch activation code: {response.status_code} - {response.text}")
-                        _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Failed to fetch activation code (status {response.status_code})")
-                        return request.redirect('/payment/status')
-                except requests.RequestException as e:
-                    _logger.error(f"Request error: {e}")
-                    _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Request exception when fetching activation code")
-                    return request.redirect('/payment/status')
-            
+            exec_code = transaction.provider_id.neatworldpayvt_get_exec_code()
             if not exec_code:
                 _logger.warning(f"[PROCESS_PAYMENT] No exec code available for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment configuration not available")

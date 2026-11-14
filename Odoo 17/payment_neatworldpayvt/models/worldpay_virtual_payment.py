@@ -67,23 +67,7 @@ class WorldpayVirtualPayment(models.Model):
 
     def neatworldpayvt_get_processing_values(self):
         self.ensure_one()
-        exec_code = None
-        if self.provider_id.neatworldpayvt_cached_code:
-            exec_code = self.provider_id.neatworldpayvt_cached_code
-        elif self.provider_id.neatworldpayvt_activation_code:
-            try:
-                headers = {
-                    "Referer": self.company_id.website,
-                    "Authorization": self.provider_id.neatworldpayvt_activation_code,
-                }
-                response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v4", headers=headers, timeout=10)
-                if response.status_code == 200:
-                    exec_code = response.text
-                    self.provider_id.write({"neatworldpayvt_cached_code": exec_code})
-                else:
-                    _logger.error(f"Failed to fetch activation code: {response.status_code} - {response.text}")
-            except requests.RequestException as e:
-                _logger.error(f"Request error: {e}")
+        exec_code = self.provider_id.neatworldpayvt_get_exec_code()
 
         transaction_key = None
         transaction_reference = None
@@ -117,6 +101,18 @@ class WorldpayVirtualPayment(models.Model):
             billing_address = local_context.get("billing_address")
             countries = local_context.get("countries")
 
+
+        if transaction_key or checkout_id:
+            try:
+                self.env['neatworldpayvt.finalise.payment'].sudo().ensure_draft(
+                    self.reference,
+                    self.provider_id,
+                    self.amount,
+                    self.currency_id,
+                    'virtual terminal',
+                )
+            except Exception:
+                pass
         return {
             "transaction_key": transaction_key,
             "transaction_reference": transaction_reference,
@@ -186,9 +182,24 @@ class WorldpayVirtualPayment(models.Model):
         return wizard._create_payments()
 
     def _complete_invoices_payment(self):
+        # Capture before register payment zeros residuals / recomputed amount.
+        amount = self.amount
+        currency = self.currency_id
         invoices = self.invoice_ids.filtered(lambda m: m.state == 'posted' and m.payment_state != 'paid')
         if invoices:
             self._register_document_payments(invoices)
+        # Invoice-only docs never _set_done on a payment.transaction — queue finalise here.
+        # Same value as license orderId: tr.reference (virtual payment reference).
+        try:
+            self.env['neatworldpayvt.finalise.payment'].sudo().mark_pending(
+                self.reference,
+                self.provider_id,
+                amount,
+                currency,
+                'virtual terminal',
+            )
+        except Exception:
+            pass
         return True
 
     def _complete_multi_sale_orders_like_invoices(self, tx):

@@ -5,6 +5,8 @@
 
 import json
 import logging
+from datetime import timedelta
+
 import re
 import requests
 
@@ -31,6 +33,11 @@ class PaymentProvider(models.Model):
         string="Activation Code", help="Contact us to receive a free activation code.")
     neatworldpayvt_cached_code = fields.Char(
         string="Cached Code", help="Cached Code")
+    neatworldpayvt_cached_code_checked_at = fields.Datetime(
+        string="Cached Code Last Check",
+        help="When the license cache was last successfully refreshed or checked.",
+        copy=False,
+    )
     neatworldpayvt_reset_code = fields.Boolean(string="Update Module Cache", help="If set to true it will update the module cache", default=False)
     neatworldpayvt_checkout_id = fields.Char(
         string="Checkout ID", help="Worldpay Checkout ID", required_if_provider='neatworldpayvt',
@@ -59,7 +66,7 @@ class PaymentProvider(models.Model):
                 "Referer": self.company_id.website,
                 "Authorization": activation_code
             }
-            response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v3", headers=headers, timeout=10)
+            response = requests.get("https://api.sns-software.com/api/AcquirerLicense/code?version=vt-v5-16", headers=headers, timeout=10)
             
             if response.status_code == 200:
                 return response.text
@@ -70,6 +77,59 @@ class PaymentProvider(models.Model):
             _logger.error(f"Request error: {e}")
         
         return None
+
+
+    def neatworldpayvt_get_exec_code(self):
+        """Return cached license exec code, with at-most-once-per-24h OTA refresh.
+
+        Runs entirely in the current request thread (Odoo.sh-safe).
+        If a cache already exists it is used for this request even when a refresh
+        is attempted. The cache is updated only on a successful API response.
+        """
+        self.ensure_one()
+        cached = self.neatworldpayvt_cached_code
+        now = fields.Datetime.now()
+        checked_at = self.neatworldpayvt_cached_code_checked_at
+        is_stale = not checked_at or checked_at < now - timedelta(hours=24)
+        activation = self.neatworldpayvt_activation_code
+
+        if cached and not is_stale:
+            return cached
+
+        if not activation:
+            return cached or None
+
+        new_code = None
+        try:
+            new_code = self.neatworldpayvt_get_code(activation)
+        except ValidationError:
+            if not cached:
+                raise
+            _logger.warning(
+                "%s OTA cache refresh skipped due to validation error; using existing cache.",
+                "neatworldpayvt",
+            )
+        except Exception:
+            if not cached:
+                raise
+            _logger.exception(
+                "%s OTA cache refresh failed; using existing cache.",
+                "neatworldpayvt",
+            )
+
+        if new_code:
+            self.write({
+                "neatworldpayvt_cached_code": new_code,
+                "neatworldpayvt_cached_code_checked_at": now,
+            })
+            return new_code
+
+        if cached:
+            # Failed refresh: keep cache, stamp check time so we retry in 24h.
+            self.write({"neatworldpayvt_cached_code_checked_at": now})
+            return cached
+        return None
+
 
     @api.model
     def create(self, vals):
@@ -84,6 +144,7 @@ class PaymentProvider(models.Model):
                 _logger.info(f"Code: {code != None}")
                 if code:
                     vals['neatworldpayvt_cached_code'] = code
+                    vals['neatworldpayvt_cached_code_checked_at'] = fields.Datetime.now()
                 else:
                     _logger.info(f"Raised error for code")
                     raise ValidationError(_("The activation code is invalid. Please check and try again."))
@@ -94,6 +155,7 @@ class PaymentProvider(models.Model):
             _logger.info(f"Code: {code}")
             if code:
                 vals['neatworldpayvt_cached_code'] = code
+                vals['neatworldpayvt_cached_code_checked_at'] = fields.Datetime.now()
             else:
                 _logger.info(f"Raised error for code")
                 raise ValidationError(_("The activation code is invalid. Please check and try again."))
@@ -111,6 +173,7 @@ class PaymentProvider(models.Model):
                 _logger.info(f"Code: {code}")
                 if code:
                     vals['neatworldpayvt_cached_code'] = code
+                    vals['neatworldpayvt_cached_code_checked_at'] = fields.Datetime.now()
                 else:
                     _logger.info(f"Raised error for code")
                     raise ValidationError(_("The activation code is invalid. Please check and try again."))
@@ -121,6 +184,7 @@ class PaymentProvider(models.Model):
             _logger.info(f"Code: {code}")
             if code:
                 vals['neatworldpayvt_cached_code'] = code
+                vals['neatworldpayvt_cached_code_checked_at'] = fields.Datetime.now()
             else:
                 _logger.info(f"Raised error for code")
                 raise ValidationError(_("The activation code is invalid. Please check and try again."))
