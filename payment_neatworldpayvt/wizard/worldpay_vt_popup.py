@@ -49,7 +49,7 @@ class WorldpayVTPopup(models.TransientModel):
 
         provider = self.env['payment.provider'].sudo().search([
             ('code', '=', 'neatworldpayvt'),
-            ('state', '!=', 'disabled'),
+            ('active', '=', True),
         ], limit=1)
         if not provider:
             raise ValidationError(_('Worldpay virtual terminal provider is not configured.'))
@@ -94,7 +94,7 @@ class WorldpayVTPopup(models.TransientModel):
 
         provider = self.env['payment.provider'].sudo().search([
             ('code', '=', 'neatworldpayvt'),
-            ('state', '!=', 'disabled'),
+            ('active', '=', True),
         ], limit=1)
         if not provider:
             raise ValidationError(_('Worldpay virtual terminal provider is not configured.'))

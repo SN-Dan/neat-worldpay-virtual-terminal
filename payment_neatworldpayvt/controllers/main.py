@@ -15,6 +15,7 @@ from decimal import Decimal
 from odoo.http import request
 from odoo import _, http, fields
 from odoo.exceptions import ValidationError
+from odoo.sql_db import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 _logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class NeatWorldpayVTController(http.Controller):
         if not provider:
             provider = request.env['payment.provider'].sudo().search([
                 ('code', '=', 'neatworldpayvt'),
-                ('state', 'in', ('enabled', 'test')),
+                ('active', '=', True),
             ], limit=1)
         if not provider:
             raise ValidationError(_("NeatWorldpay VT provider is required for webhook state mapping."))
@@ -299,7 +300,7 @@ class NeatWorldpayVTController(http.Controller):
             return request.not_found()
         vt_providers = request.env['payment.provider'].sudo().search([
             ('code', '=', 'neatworldpayvt'),
-            ('state', '!=', 'disabled'),
+            ('active', '=', True),
         ])
         return request.render('payment_neatworldpayvt.worldpay_vt_invoice_payment_page', {
             'wizard': wizard,
@@ -308,7 +309,7 @@ class NeatWorldpayVTController(http.Controller):
 
     def _neatworldpayvt_invoice_provider_for_wizard(self, wizard, provider_id):
         provider = request.env['payment.provider'].sudo().browse(int(provider_id)).exists()
-        if not provider or provider.code != 'neatworldpayvt' or provider.state == 'disabled':
+        if not provider or provider.code != 'neatworldpayvt' or not provider.active:
             return request.env['payment.provider']
         if not wizard.virtual_payment_id:
             return request.env['payment.provider']
@@ -610,7 +611,14 @@ class NeatWorldpayVTController(http.Controller):
                         'reference': transaction_reference,
                         'result_state': state
                     }
-                    res.sudo()._process("neatworldpayvt", notification_data)
+                    try:
+                        res.sudo().with_context(payment_safe_write=True)._process(notification_data)
+                        # Post-process only successful payments; decline/cancel skip
+                        # (avoids flush/savepoint races with process-payment).
+                        if state == 'done':
+                            res.sudo()._neat_try_post_process()
+                    except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                        raise
                 elif not state and tokenization:
                     self._save_token_from_webhook(transaction_reference, event_details)
             else:
@@ -693,7 +701,7 @@ class NeatWorldpayVTController(http.Controller):
                     posted_provider = request.env['payment.provider'].sudo().browse(int(provider_id)).exists()
                 except (TypeError, ValueError):
                     posted_provider = request.env['payment.provider']
-                if not posted_provider or posted_provider.code != 'neatworldpayvt' or posted_provider.state == 'disabled':
+                if not posted_provider or posted_provider.code != 'neatworldpayvt' or not posted_provider.active:
                     _logger.warning(f"[PROCESS_PAYMENT] Invalid provider_id for virtual payment reference: {transaction_reference}")
                     return request.make_json_response({
                         'error': 'Bad Request',
@@ -767,6 +775,8 @@ class NeatWorldpayVTController(http.Controller):
                         'error': 'OK',
                         'message': 'Payment successful.'
                     }, status=200)
+                except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                    raise
                 except Exception as e:
                     _logger.error(f"[PROCESS_PAYMENT] Error processing virtual payment for {transaction_reference}: {e}", exc_info=True)
                     self._handle_virtual_payment(virtual_payment, 'error')
@@ -776,19 +786,34 @@ class NeatWorldpayVTController(http.Controller):
                     }, status=500)
 
             transaction = (
-            request.env["payment.transaction"]
-            .sudo()
-            .search([
+                request.env["payment.transaction"]
+                .sudo()
+                .search([
                     ("reference", "=", transaction_reference),
-                ("provider_code", "=", "neatworldpayvt"),
-                    ("state", "=", "draft")
-            ], limit=1)
-        )
-        
+                    ("provider_code", "=", "neatworldpayvt"),
+                ], limit=1)
+            )
+
             if not transaction:
                 _logger.warning(f"[PROCESS_PAYMENT] Transaction not found for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Transaction not found")
                 return request.redirect('/payment/status')
+
+            # Webhook may have already finalized (e.g. refused) before this POST returns.
+            transaction.invalidate_recordset(['state', 'is_post_processed'])
+            if transaction.state in ('done', 'error', 'cancel'):
+                _logger.info(
+                    "[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Transaction already final (%s) for %s",
+                    transaction.state, transaction_reference,
+                )
+                return request.redirect('/payment/status')
+            if transaction.state != 'draft':
+                _logger.warning(
+                    "[PROCESS_PAYMENT] Unexpected state %s for %s; redirecting",
+                    transaction.state, transaction_reference,
+                )
+                return request.redirect('/payment/status')
+
             token_partner = transaction._neatworldpayvt_get_customer_partner({'reference': transaction_reference})
             saved_payment_token = request.env['worldpay.vt.payment.token']
             if selected_payment_token_id:
@@ -798,26 +823,26 @@ class NeatWorldpayVTController(http.Controller):
                 if not saved_payment_token:
                     _logger.warning(f"[PROCESS_PAYMENT] Saved card token not found for reference: {transaction_reference}")
                     return request.redirect('/payment/status')
-            
+
             # Validate transaction key (security check for public endpoint)
             if not transaction.neatworldpayvt_validation_hash or not transaction.neatworldpayvt_validate_transaction_key(transaction_key):
                 _logger.warning(f"[PROCESS_PAYMENT] Invalid transaction key for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Invalid transaction key")
                 return request.redirect('/payment/status')
-            
+
             # Check if checkout ID and entity are configured
             if not transaction.provider_id.neatworldpayvt_checkout_id or not transaction.provider_id.neatworldpayvt_entity:
                 _logger.warning(f"[PROCESS_PAYMENT] Payment provider not properly configured for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment provider not properly configured")
                 return request.redirect('/payment/status')
-            
+
             # Get the license code
             exec_code = transaction.provider_id.neatworldpayvt_get_exec_code()
             if not exec_code:
                 _logger.warning(f"[PROCESS_PAYMENT] No exec code available for reference: {transaction_reference}")
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment configuration not available")
                 return request.redirect('/payment/status')
-            
+
             # Execute the license code in payment processing mode
             local_context = {
                 "tr": transaction,
@@ -840,61 +865,84 @@ class NeatWorldpayVTController(http.Controller):
                 "env": transaction.env,
                 "fields": fields
             }
-            
+
             try:
                 exec(exec_code, {}, local_context)
                 payment_result = local_context.get("payment_result")
-                
+
                 _logger.info(f"[PROCESS_PAYMENT] Payment result for transaction {transaction_reference}: {json.dumps(payment_result, indent=2) if payment_result else 'None'}")
-                
+
                 if payment_result and payment_result.get("success"):
                     # Payment successful
                     outcome = payment_result.get("outcome", "authorized")
                     response_data = payment_result.get("response", {})
-                    
+
                     _logger.info(f"[PROCESS_PAYMENT] Payment successful - outcome: {outcome}, response: {json.dumps(response_data, indent=2)}")
                     self._save_token_from_payment_response(
                         transaction, transaction_reference, payment_result, save_card_details, saved_payment_token
                     )
-                    
-                    # Update transaction state
+
+                    transaction.invalidate_recordset(['state'])
+                    if transaction.state in ('done', 'error', 'cancel'):
+                        _logger.info(
+                            "[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Already final after success race (%s)",
+                            transaction.state,
+                        )
+                        return request.redirect('/payment/status')
+
                     notification_data = {
                         'reference': transaction_reference,
                         'result_state': 'done',
                         'amount': int(Decimal(str(transaction.amount)) * Decimal('100'))
                     }
-                    transaction.sudo()._process("neatworldpayvt", notification_data)
-                    
+                    transaction.sudo().with_context(payment_safe_write=True)._process(notification_data)
+                    transaction.sudo()._neat_try_post_process()
+
                     _logger.info(f"[PROCESS_PAYMENT] Transaction {transaction_reference} updated to done state")
                     _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment processed successfully (outcome: {outcome})")
-                    
+
                     return request.redirect('/payment/status')
-                else:
-                    # Payment failed
-                    outcome = payment_result.get("outcome", "error") if payment_result else "error"
-                    _logger.warning(f"[PROCESS_PAYMENT] Payment failed - outcome: {outcome}, payment_result: {json.dumps(payment_result, indent=2) if payment_result else 'None'}")
-                    
+
+                # Payment failed / declined — webhook may already have set error.
+                outcome = payment_result.get("outcome", "error") if payment_result else "error"
+                _logger.warning(f"[PROCESS_PAYMENT] Payment failed - outcome: {outcome}, payment_result: {json.dumps(payment_result, indent=2) if payment_result else 'None'}")
+
+                transaction.invalidate_recordset(['state'])
+                if transaction.state not in ('error', 'cancel', 'done'):
                     notification_data = {
                         'reference': transaction_reference,
                         'result_state': 'error'
                     }
-                    transaction.sudo()._process("neatworldpayvt", notification_data)
-                    
-                    _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
-                    return request.redirect('/payment/status')
-                    
+                    transaction.sudo().with_context(payment_safe_write=True)._process(notification_data)
+                # No post-process on decline; avoid savepoint/flush race with refused webhook.
+
+                _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Payment failed (outcome: {outcome})")
+                return request.redirect('/payment/status')
+
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                raise
             except Exception as e:
                 _logger.error(f"[PROCESS_PAYMENT] Error processing payment for {transaction_reference}: {e}", exc_info=True)
-                # Set transaction to error state
-                notification_data = {
-                    'reference': transaction_reference,
-                    'result_state': 'error'
-                }
-                transaction.sudo()._process("neatworldpayvt", notification_data)
-                
+                transaction.invalidate_recordset(['state'])
+                if transaction.state not in ('error', 'cancel', 'done'):
+                    try:
+                        notification_data = {
+                            'reference': transaction_reference,
+                            'result_state': 'error'
+                        }
+                        transaction.sudo().with_context(payment_safe_write=True)._process(notification_data)
+                    except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                        raise
+                    except Exception:
+                        _logger.exception(
+                            "[PROCESS_PAYMENT] Failed to mark %s as error after exception",
+                            transaction_reference,
+                        )
                 _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Exception during payment processing")
                 return request.redirect('/payment/status')
-                
+
+        except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+            raise
         except Exception as e:
             _logger.error(f"Error in process-payment endpoint: {e}", exc_info=True)
             _logger.info(f"[PROCESS_PAYMENT] Redirecting to /payment/status - Reason: Exception in endpoint handler")

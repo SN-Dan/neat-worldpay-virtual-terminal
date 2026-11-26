@@ -24,7 +24,7 @@
                     <select id="vtProviderSelect" required="required">
                         <option value="">Choose a provider...</option>
                         <t t-foreach="vt_providers" t-as="p">
-                            <option t-att-value="p.id" t-esc="p.name"
+                            <option t-att-value="p.id" t-out="p.name"
                                     t-att-selected="wizard.provider_id and wizard.provider_id.id == p.id and 'selected' or None"/>
                         </t>
                     </select>

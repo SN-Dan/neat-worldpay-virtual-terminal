@@ -18,39 +18,39 @@
                 <field
                         name="neatworldpayvt_reset_code"
                         string="Update Module Cache"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_activation_code"
                         string="Activation Code"
                         password="True"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_username"
                         string="Username"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_password"
                         string="Password"
                         password="True"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_checkout_id"
                         string="Checkout ID"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_entity"
                         string="Entity"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <field
                         name="neatworldpayvt_fallback_user_id"
                         string="Fallback Failure VT User"
-                        required="code == 'neatworldpayvt' and state != 'disabled'"
+                        required="code == 'neatworldpayvt' and active"
                     />
                     <div class="alert alert-success" role="alert" colspan="2">
                         <b>By using this module you agree to our </b>

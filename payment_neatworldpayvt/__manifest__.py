@@ -11,7 +11,7 @@
     'depends': ['payment', 'account', 'sale'],
     'images': ['static/description/main.gif'],
     'data': [
-        'security/ir.model.access.csv',
+        'security/ir.access.csv',
         'views/payment_provider_views.xml',
         'views/account_move_views.xml',
         'views/sale_order_views.xml',

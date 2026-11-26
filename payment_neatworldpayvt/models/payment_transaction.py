@@ -13,7 +13,6 @@ from odoo.addons.payment_neatworldpayvt.controllers.main import NeatWorldpayVTCo
 import uuid
 import re
 from decimal import Decimal
-from odoo.tools import config, pycompat, ustr
 from passlib.context import CryptContext
 
 _logger = logging.getLogger(__name__)
@@ -21,6 +20,38 @@ _logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     _inherit = 'payment.transaction'
+
+    def _neat_try_post_process(self):
+        """Post-process after sync `_process`, re-raising concurrency for HTTP retry.
+
+        Core `_try_post_process` swallows SerializationFailure then fails on an
+        aborted cursor when triggering the cron (500). Let HTTP retry instead.
+        """
+        from odoo.sql_db import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
+
+        for tx in self:
+            try:
+                tx.env.flush_all()
+                with tx.env.cr.savepoint():
+                    (tx | tx.source_transaction_id)._post_process_with_lock()
+                tx._notify_status()
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                raise
+            except Exception:
+                _logger.exception(
+                    "Failed to post-process transaction %s; deferring to cron.",
+                    tx.reference,
+                )
+                try:
+                    tx.env.ref("payment.post_processing_cron")._trigger()
+                except Exception:
+                    _logger.exception(
+                        "Failed to trigger post-processing cron for %s", tx.reference
+                    )
+                try:
+                    tx._notify_status()
+                except Exception:
+                    pass
 
     # New fields for transaction key hashing
     neatworldpayvt_validation_hash = fields.Char(string='Success Validation Hash', default=None)
@@ -46,7 +77,7 @@ class PaymentTransaction(models.Model):
             hashed_key = self._pwd_context.hash(transaction_key)
             
             # Store the hash (salt is included in the hash string)
-            self.write({
+            self.with_context(payment_safe_write=True).write({
                 'neatworldpayvt_validation_hash': hashed_key
             })
             
@@ -82,7 +113,9 @@ class PaymentTransaction(models.Model):
                 _logger.info(f"Success transaction key validated successfully for transaction {self.reference}")
             else:
                 # Increment failed attempt counter only when validation fails
-                self.write({'neatworldpayvt_validation_attempts': self.neatworldpayvt_validation_attempts + 1})
+                self.with_context(payment_safe_write=True).write({
+                    'neatworldpayvt_validation_attempts': self.neatworldpayvt_validation_attempts + 1
+                })
                 _logger.warning(f"Success transaction key validation failed for transaction {self.reference} (failed attempt {self.neatworldpayvt_validation_attempts})")
             
             return is_valid
@@ -127,7 +160,8 @@ class PaymentTransaction(models.Model):
             return refund_tx
 
         notification_data = {'reference': refund_tx.reference, 'result_state': 'done'}
-        refund_tx._process('neatworldpayvt', notification_data)
+        refund_tx.with_context(payment_safe_write=True)._process(notification_data)
+        refund_tx._neat_try_post_process()
 
         return refund_tx
 
@@ -142,7 +176,8 @@ class PaymentTransaction(models.Model):
             'reference': tx.reference,
             'result_state': 'done',
         }
-        tx._process('neatworldpayvt', notification_data)
+        tx.with_context(payment_safe_write=True)._process(notification_data)
+        tx._neat_try_post_process()
 
         return child_capture_tx
 
@@ -154,7 +189,8 @@ class PaymentTransaction(models.Model):
 
         tx = child_void_tx or self
         notification_data = {'reference': tx.reference, 'result_state': 'cancel'}
-        tx._process('neatworldpayvt', notification_data)
+        tx.with_context(payment_safe_write=True)._process(notification_data)
+        tx._neat_try_post_process()
 
         return child_void_tx
 
@@ -216,7 +252,7 @@ class PaymentTransaction(models.Model):
                 decimal_amount = Decimal(str(amount_value)) / Decimal('100')
                 amount_float = float(decimal_amount)
                 if amount_float != self.amount:
-                    self.sudo().write({ 'amount': amount_float })
+                    self.sudo().with_context(payment_safe_write=True).write({'amount': amount_float})
             else:
                 _logger.info(f"\n No amount provided for done notification {notification_data} \n")
             self._set_done()

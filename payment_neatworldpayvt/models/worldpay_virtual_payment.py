@@ -204,6 +204,7 @@ class WorldpayVirtualPayment(models.Model):
 
     def _complete_multi_sale_orders_like_invoices(self, tx):
         """Confirm/invoice SOs if needed, then register onto unpaid invoices (same as invoice flow)."""
+        tx = tx.with_context(payment_safe_write=True)
         for order in self.sale_order_ids.filtered(lambda o: o.state in ('draft', 'sent')):
             order.with_context(send_email=True).action_confirm()
 
@@ -240,7 +241,7 @@ class WorldpayVirtualPayment(models.Model):
             if not tx:
                 return False
             if tx.state != 'done':
-                tx._set_done()
+                tx.with_context(payment_safe_write=True)._set_done()
             if tx.is_post_processed:
                 return True
             # Finalize disabled — always use register payment flow.
@@ -255,5 +256,5 @@ class WorldpayVirtualPayment(models.Model):
         tx = self._get_sale_orders_payment_transaction()
         if not tx or tx.state in ('done', 'cancel'):
             return False
-        tx._set_canceled()
+        tx.with_context(payment_safe_write=True)._set_canceled()
         return True
